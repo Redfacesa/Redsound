@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: redsound
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUNO_API_KEY
+        sync: false
+      - key: SUNO_MODEL
+        value: V6
+      - key: MARKETPLACE_ENABLED
+        value: "false"
+      - key: CREATOR_TERMS_VERSION
+        value: draft
+      - key: PLATFORM_FEE_BPS
+        value: "1000"
