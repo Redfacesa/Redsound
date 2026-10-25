@@ -1,10 +1,27 @@
 import type { Arrangement } from '@shared/arrange.ts';
 import type { AppConfig, LicenseGrant, Listing, Profile, Project, TaskRecord, TrackView } from '@shared/types.ts';
 
+const ACCOUNT_KEY = 'redsound-account';
+
+export function rememberAccount(email: string) {
+  const next = email.trim().toLowerCase();
+  if (next) localStorage.setItem(ACCOUNT_KEY, next);
+  else localStorage.removeItem(ACCOUNT_KEY);
+}
+
+function accountHeaders(): Record<string, string> {
+  try {
+    const email = localStorage.getItem(ACCOUNT_KEY) || '';
+    return email ? { 'x-redsound-account': email } : {};
+  } catch {
+    return {};
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...accountHeaders(), ...(init?.headers || {}) },
   });
   const text = await response.text();
   let body: { error?: string } = {};
@@ -24,6 +41,8 @@ export const api = {
   billing: () => request<{
     payConfigured: boolean;
     payOrigin: string;
+    admin: boolean;
+    accountEmail: string;
     pendingPaymentId?: string;
     plans: Array<{
       id: 'basic' | 'premium' | 'studio';
@@ -50,7 +69,7 @@ export const api = {
   confirmPlan: (paymentId: string) =>
     request<{ active: boolean; status: string; planId?: string; currentPeriodEnd?: string }>('/api/billing/confirm', { method: 'POST', body: JSON.stringify({ paymentId }) }),
   profile: () => request<Profile>('/api/profile'),
-  saveProfile: (profile: Pick<Profile, 'displayName' | 'handle'>) =>
+  saveProfile: (profile: Partial<Pick<Profile, 'displayName' | 'handle' | 'email'>>) =>
     request<Profile>('/api/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   library: () => request<TrackView[]>('/api/library'),
   asset: (id: string) => request<TrackView>(`/api/assets/${id}`),

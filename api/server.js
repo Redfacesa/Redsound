@@ -1304,6 +1304,9 @@ import express from "express";
 init_catalog();
 init_store();
 
+// server/billing.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+
 // shared/plans.ts
 var SOUND_PLANS = [
   {
@@ -1386,6 +1389,20 @@ var BillingError = class extends Error {
 var COMMERCE_BASE = String(
   process.env.REDFACE_COMMERCE_API_BASE || "https://bpzzgilwlkghgfkvkkxx.supabase.co/functions/v1/commerce-api"
 ).replace(/\/$/, "");
+var accounts = new AsyncLocalStorage();
+var ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || "info@redfacepay.co.za").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean)
+);
+function bindAccount(req, next) {
+  const email = String(req.get("x-redsound-account") || "").trim().toLowerCase();
+  accounts.run(email, next);
+}
+function actorEmail() {
+  return accounts.getStore() || String(view().profile.email || "").trim().toLowerCase();
+}
+function isAdmin() {
+  return ADMIN_EMAILS.has(actorEmail());
+}
 function payConfigured() {
   return Boolean(String(process.env.REDFACE_API_KEY || "").trim());
 }
@@ -1406,9 +1423,12 @@ function billingSnapshot() {
   const subscription = currentSubscription();
   const stored = view().profile.subscription;
   const plan = soundPlan(subscription?.planId);
+  const admin = isAdmin();
   return {
     payConfigured: payConfigured(),
     payOrigin: "https://www.redfacepay.co.za",
+    admin,
+    accountEmail: actorEmail(),
     plans: SOUND_PLANS.map((item) => ({
       id: item.id,
       name: item.name,
@@ -1420,7 +1440,14 @@ function billingSnapshot() {
       includes: [...item.includes]
     })),
     pendingPaymentId: stored?.status === "pending" ? stored.paymentId : void 0,
-    subscription: subscription ? {
+    subscription: admin ? {
+      planId: "studio",
+      planName: "Admin",
+      status: "active",
+      email: actorEmail(),
+      generationsUsed: generationsUsed(),
+      generations: 0
+    } : subscription ? {
       planId: subscription.planId,
       planName: plan?.name || subscription.planId,
       status: subscription.status,
@@ -1432,6 +1459,7 @@ function billingSnapshot() {
   };
 }
 function requireAccess(gate) {
+  if (isAdmin()) return;
   const subscription = currentSubscription();
   const plan = soundPlan(subscription?.planId);
   if (!plan || !planAllows(plan.id, gate)) {
@@ -1987,6 +2015,7 @@ function registerProduce(app2) {
 loadEnv();
 var app = express();
 app.use(express.json({ limit: "30mb" }));
+app.use((req, _res, next) => bindAccount(req, next));
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "redsound" });
 });
@@ -2014,16 +2043,25 @@ app.post("/api/billing/confirm", async (req, res, next) => {
 app.get("/api/profile", (_req, res) => {
   res.json(view().profile);
 });
-app.put("/api/profile", (req, res) => {
-  void update((db) => {
+app.put("/api/profile", (req, res, next) => {
+  let email;
+  if (typeof req.body.email === "string") {
+    email = req.body.email.trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      next(new BillingError(400, "Enter a valid account email."));
+      return;
+    }
+  }
+  update((db) => {
     if (typeof req.body.displayName === "string" && req.body.displayName.trim()) {
       db.profile.displayName = req.body.displayName.trim().slice(0, 80);
     }
     if (typeof req.body.handle === "string" && req.body.handle.trim()) {
       db.profile.handle = req.body.handle.trim().replace(/^@/, "").slice(0, 40);
     }
+    if (email !== void 0) db.profile.email = email;
     return db.profile;
-  }).then((profile) => res.json(profile));
+  }).then((profile) => res.json(profile)).catch(next);
 });
 app.get("/api/library", (_req, res) => {
   const db = view();

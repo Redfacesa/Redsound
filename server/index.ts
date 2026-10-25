@@ -49,12 +49,13 @@ import {
   vocalRemovalRecord,
 } from './suno/client.ts';
 import { refreshSideTask, registerProduce } from './actions.ts';
-import { BillingError, billingSnapshot, confirmCheckout, publicOrigin, requireAccess, startCheckout } from './billing.ts';
+import { BillingError, billingSnapshot, bindAccount, confirmCheckout, publicOrigin, requireAccess, startCheckout } from './billing.ts';
 
 loadEnv();
 
 const app = express();
 app.use(express.json({ limit: '30mb' }));
+app.use((req, _res, next) => bindAccount(req, next));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'redsound' });
@@ -89,16 +90,25 @@ app.get('/api/profile', (_req, res) => {
   res.json(view().profile);
 });
 
-app.put('/api/profile', (req, res) => {
-  void update((db) => {
+app.put('/api/profile', (req, res, next) => {
+  let email: string | undefined;
+  if (typeof req.body.email === 'string') {
+    email = req.body.email.trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      next(new BillingError(400, 'Enter a valid account email.'));
+      return;
+    }
+  }
+  update((db) => {
     if (typeof req.body.displayName === 'string' && req.body.displayName.trim()) {
       db.profile.displayName = req.body.displayName.trim().slice(0, 80);
     }
     if (typeof req.body.handle === 'string' && req.body.handle.trim()) {
       db.profile.handle = req.body.handle.trim().replace(/^@/, '').slice(0, 40);
     }
+    if (email !== undefined) db.profile.email = email;
     return db.profile;
-  }).then((profile) => res.json(profile));
+  }).then((profile) => res.json(profile)).catch(next);
 });
 
 app.get('/api/library', (_req, res) => {

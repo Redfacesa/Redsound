@@ -25,6 +25,7 @@ export interface Profile {
   id: string;
   displayName: string;
   handle: string;
+  email?: string;
   subscription?: SubscriptionState;
 }
 

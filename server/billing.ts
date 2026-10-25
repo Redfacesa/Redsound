@@ -1,4 +1,5 @@
 import type express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { planAllows, planMeters, requiredPlanName, soundPlan, SOUND_PLANS, type Gate, type SoundPlanId } from '../shared/plans.ts';
 import type { SubscriptionState } from '../shared/types.ts';
 import { update, view } from './store.ts';
@@ -14,6 +15,28 @@ export class BillingError extends Error {
 const COMMERCE_BASE = String(
   process.env.REDFACE_COMMERCE_API_BASE || 'https://bpzzgilwlkghgfkvkkxx.supabase.co/functions/v1/commerce-api',
 ).replace(/\/$/, '');
+
+const accounts = new AsyncLocalStorage<string>();
+
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || 'info@redfacepay.co.za')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function bindAccount(req: express.Request, next: () => void) {
+  const email = String(req.get('x-redsound-account') || '').trim().toLowerCase();
+  accounts.run(email, next);
+}
+
+function actorEmail(): string {
+  return accounts.getStore() || String(view().profile.email || '').trim().toLowerCase();
+}
+
+export function isAdmin(): boolean {
+  return ADMIN_EMAILS.has(actorEmail());
+}
 
 export function payConfigured(): boolean {
   return Boolean(String(process.env.REDFACE_API_KEY || '').trim());
@@ -38,9 +61,12 @@ export function billingSnapshot() {
   const subscription = currentSubscription();
   const stored = view().profile.subscription;
   const plan = soundPlan(subscription?.planId);
+  const admin = isAdmin();
   return {
     payConfigured: payConfigured(),
     payOrigin: 'https://www.redfacepay.co.za',
+    admin,
+    accountEmail: actorEmail(),
     plans: SOUND_PLANS.map((item) => ({
       id: item.id,
       name: item.name,
@@ -52,7 +78,16 @@ export function billingSnapshot() {
       includes: [...item.includes],
     })),
     pendingPaymentId: stored?.status === 'pending' ? stored.paymentId : undefined,
-    subscription: subscription
+    subscription: admin
+      ? {
+          planId: 'studio' as const,
+          planName: 'Admin',
+          status: 'active',
+          email: actorEmail(),
+          generationsUsed: generationsUsed(),
+          generations: 0,
+        }
+      : subscription
       ? {
           planId: subscription.planId,
           planName: plan?.name || subscription.planId,
@@ -67,6 +102,7 @@ export function billingSnapshot() {
 }
 
 export function requireAccess(gate: Gate) {
+  if (isAdmin()) return;
   const subscription = currentSubscription();
   const plan = soundPlan(subscription?.planId);
   if (!plan || !planAllows(plan.id, gate)) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { formatZar } from '@shared/rights.ts';
-import { api } from '../lib/api';
+import { api, rememberAccount } from '../lib/api';
 
 type Billing = Awaited<ReturnType<typeof api.billing>>;
 
@@ -16,7 +16,9 @@ export function PlansPage() {
   function load() {
     return api.billing().then((next) => {
       setBilling(next);
-      if (next.subscription?.email) setEmail((current) => current || next.subscription?.email || '');
+      const known = next.accountEmail || next.subscription?.email || '';
+      if (known) setEmail((current) => current || known);
+      if (next.admin && next.accountEmail) rememberAccount(next.accountEmail);
     });
   }
 
@@ -34,10 +36,29 @@ export function PlansPage() {
       .finally(() => { load().catch((reason: Error) => setError(reason.message)); });
   }, [params]);
 
+  async function saveAccount() {
+    setBusy('account');
+    setError('');
+    try {
+      rememberAccount(email);
+      await api.saveProfile({ email: email.trim().toLowerCase() });
+      const next = await api.billing();
+      setBilling(next);
+      setNote(next.admin
+        ? 'Admin access is on. This account is not billed.'
+        : 'Account saved. Subscribe to generate.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Account was not saved.');
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function subscribe(planId: string) {
     setBusy(planId);
     setError('');
     try {
+      rememberAccount(email);
       const result = await api.checkoutPlan(planId, email);
       window.location.assign(result.checkoutUrl);
     } catch (reason) {
@@ -46,7 +67,7 @@ export function PlansPage() {
     }
   }
 
-  const active = billing?.subscription;
+  const active = billing?.admin ? null : billing?.subscription;
 
   return (
     <div className="stack">
@@ -57,6 +78,7 @@ export function PlansPage() {
       </div>
       {error && <p className="error">{error}</p>}
       {note && <p className="meta">{note}</p>}
+      {billing?.admin && <p className="meta">Admin access is on for {billing.accountEmail}. This account is not billed.</p>}
       {active && (
         <p className="meta">
           {active.planName} is active until {active.currentPeriodEnd ? new Date(active.currentPeriodEnd).toLocaleDateString('en-ZA') : 'this period'}
@@ -64,9 +86,12 @@ export function PlansPage() {
         </p>
       )}
       <label>
-        Receipt email
+        Account email
         <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@studio.co.za" autoComplete="email" />
       </label>
+      <button className="btn secondary" type="button" disabled={Boolean(busy)} onClick={saveAccount}>
+        {busy === 'account' ? 'Saving' : 'Save account'}
+      </button>
       <div className="cards">
         {billing?.plans.map((plan) => (
           <article className="card" key={plan.id}>
