@@ -385,6 +385,8 @@ audio.bare { width: 100%; }
   flex: 0 0 auto;
 }
 .tl-tool.on { border-color: var(--red); background: #2a1210; }
+.tl-play { gap: 6px; min-width: 84px; }
+.tl-note { color: #ffb0a8; font-size: 12px; white-space: nowrap; }
 .tl-tools {
   display: flex;
   flex-wrap: nowrap;

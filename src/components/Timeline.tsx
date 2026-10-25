@@ -92,6 +92,7 @@ export function Timeline({
   const [pxPerSec, setPxPerSec] = useState(() => initialZoom(arrangement));
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [playNote, setPlayNote] = useState('');
   const [selection, setSelection] = useState<Range | null>(null);
   const [selectionTrack, setSelectionTrack] = useState('');
   const [loop, setLoop] = useState(false);
@@ -208,7 +209,7 @@ export function Timeline({
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.tagName === 'BUTTON')) return;
       const meta = event.metaKey || event.ctrlKey;
       if (event.code === 'Space') {
         event.preventDefault();
@@ -352,17 +353,27 @@ export function Timeline({
     if (existing) return existing;
     const url = sources[assetId];
     if (!url) return null;
-    const response = await fetch(url);
-    const audio = await context().decodeAudioData((await response.arrayBuffer()).slice(0));
-    buffers.current.set(assetId, audio);
-    durations.current[assetId] = audio.duration;
-    return audio;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const audio = await context().decodeAudioData((await response.arrayBuffer()).slice(0));
+      buffers.current.set(assetId, audio);
+      durations.current[assetId] = audio.duration;
+      return audio;
+    } catch {
+      return null;
+    }
   }
 
   async function startPlayback(from: number) {
     const gen = ++playGen.current;
     const ctx = context();
-    await ctx.resume();
+    try {
+      await ctx.resume();
+    } catch {
+      setPlayNote('The browser blocked playback. Click Play again.');
+      return;
+    }
     if (gen !== playGen.current) return;
     cancelAnimationFrame(raf.current);
     stopSources();
@@ -374,6 +385,8 @@ export function Timeline({
     startedAt.current = now;
     offsetAt.current = from;
     nodes.current = scheduleArrangement(ctx, current, buffers.current, desk, from, now);
+    const wantedSound = current.tracks.some((track) => !track.muted && track.clips.length > 0);
+    setPlayNote(wantedSound && nodes.current.length === 0 ? 'This take did not load, so there is nothing to play.' : '');
     playingRef.current = true;
     setPlaying(true);
     const tick = () => {
@@ -696,13 +709,14 @@ export function Timeline({
   return (
     <section className="tl" tabIndex={0}>
       <div className="tl-bar">
-        <button className="tl-btn" type="button" aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}><Mark name={playing ? 'pause' : 'play'} /></button>
+        <button className={playing ? 'tl-tool tl-play on' : 'tl-tool tl-play'} type="button" onClick={togglePlay}><Mark name={playing ? 'pause' : 'play'} />{playing ? 'Pause' : 'Play'}</button>
         <button className="tl-btn" type="button" aria-label="Stop" onClick={stopToStart}><Mark name="stop" /></button>
         <button className="tl-btn" type="button" aria-label="Undo" onClick={undo}><Mark name="undo" /></button>
         <button className="tl-btn" type="button" aria-label="Redo" onClick={redo}><Mark name="redo" /></button>
         <button className="tl-btn" type="button" aria-label="Zoom out" onClick={() => zoomTo.current(zoomRef.current / 1.25)}><Mark name="minus" /></button>
         <button className="tl-btn" type="button" aria-label="Zoom in" onClick={() => zoomTo.current(zoomRef.current * 1.25)}><Mark name="plus" /></button>
         <span className="tl-clock">{clock(playhead)}</span>
+        {playNote && <span className="tl-note">{playNote}</span>}
         {onCapture && (
           <>
             <select className="tl-mic" aria-label="Microphone" value={deviceId} onChange={(event) => setDeviceId(event.target.value)}>
