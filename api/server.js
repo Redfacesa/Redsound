@@ -16,6 +16,7 @@ var __export = (target, all) => {
 // server/store.ts
 import fs from "node:fs";
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 function emptyDb() {
   return {
     profile: { id: "local-creator", displayName: "Creator", handle: "creator" },
@@ -35,6 +36,12 @@ function emptyDb() {
     grantSeq: 0
   };
 }
+function supabaseConfig() {
+  const url = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
+  if (!url || !key) return null;
+  return { url, key };
+}
 function read() {
   try {
     const raw = fs.readFileSync(dbPath, "utf8");
@@ -49,34 +56,88 @@ function write(db) {
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, dbPath);
 }
+async function loadRemote(token, ownerId) {
+  const config = supabaseConfig();
+  if (!config) return emptyDb();
+  const response = await fetch(
+    `${config.url}/rest/v1/redsound_state?owner_id=eq.${encodeURIComponent(ownerId)}&select=document`,
+    { headers: { apikey: config.key, Authorization: `Bearer ${token}`, Accept: "application/json" } }
+  );
+  if (!response.ok) throw new Error("Could not open the studio library.");
+  const rows = await response.json();
+  const document = rows[0]?.document;
+  if (!document || typeof document !== "object") return emptyDb();
+  return { ...emptyDb(), ...document };
+}
+async function saveRemote(scope) {
+  const config = supabaseConfig();
+  if (!config) return;
+  const response = await fetch(`${config.url}/rest/v1/redsound_state`, {
+    method: "POST",
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${scope.token}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify({
+      owner_id: scope.ownerId,
+      document: scope.db,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    })
+  });
+  if (!response.ok) throw new Error("Could not save the studio library.");
+}
+async function enterStudio(ownerId, token, done) {
+  if (!ownerId || !token || !supabaseConfig()) {
+    done();
+    return;
+  }
+  const db = await loadRemote(token, ownerId);
+  scopes.run({ ownerId, token, db, queue: Promise.resolve() }, done);
+}
 function update(mutate) {
-  const run = queue.then(() => {
-    const db = read();
-    const result = mutate(db);
-    write(db);
+  const scope = scopes.getStore();
+  if (!scope) {
+    const run2 = queue.then(() => {
+      const db = read();
+      const result = mutate(db);
+      write(db);
+      return result;
+    });
+    queue = run2.then(
+      () => void 0,
+      () => void 0
+    );
+    return run2;
+  }
+  const run = scope.queue.then(async () => {
+    const result = mutate(scope.db);
+    await saveRemote(scope);
     return result;
   });
-  queue = run.then(
+  scope.queue = run.then(
     () => void 0,
     () => void 0
   );
   return run;
 }
 function view() {
-  return read();
+  return scopes.getStore()?.db ?? read();
 }
 function uploadsDir() {
   const dir = path.join(dataDir, "uploads");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
-var dataDir, dbPath, queue;
+var dataDir, dbPath, queue, scopes;
 var init_store = __esm({
   "server/store.ts"() {
     "use strict";
     dataDir = process.env.VERCEL ? path.join("/tmp", "redsound") : path.resolve(process.cwd(), "data");
     dbPath = path.join(dataDir, "db.json");
     queue = Promise.resolve();
+    scopes = new AsyncLocalStorage();
   }
 });
 
@@ -1305,7 +1366,7 @@ init_catalog();
 init_store();
 
 // server/billing.ts
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
 
 // shared/plans.ts
 var SOUND_PLANS = [
@@ -1389,7 +1450,7 @@ var BillingError = class extends Error {
 var COMMERCE_BASE = String(
   process.env.REDFACE_COMMERCE_API_BASE || "https://bpzzgilwlkghgfkvkkxx.supabase.co/functions/v1/commerce-api"
 ).replace(/\/$/, "");
-var accounts = new AsyncLocalStorage();
+var accounts = new AsyncLocalStorage2();
 var ADMIN_EMAILS = new Set(
   String(process.env.ADMIN_EMAILS || "info@redfacepay.co.za").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean)
 );
@@ -1398,25 +1459,34 @@ function bearer(req) {
   const header2 = String(req.get("authorization") || "");
   return header2.toLowerCase().startsWith("bearer ") ? header2.slice(7).trim() : "";
 }
-async function emailFromToken(token) {
-  if (!token) return "";
+async function identityFromToken(token) {
+  if (!token) return null;
   const hit = verifiedSessions.get(token);
-  if (hit && hit.until > Date.now()) return hit.email;
+  if (hit && hit.until > Date.now()) return { id: hit.id, email: hit.email };
   const base = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
-  if (!base || !key) return "";
+  if (!base || !key) return null;
   const response = await fetch(`${base}/auth/v1/user`, {
     headers: { apikey: key, Authorization: `Bearer ${token}` }
   });
-  if (!response.ok) return "";
+  if (!response.ok) return null;
   const body = await response.json().catch(() => ({}));
   const email = String(body.email || "").trim().toLowerCase();
-  if (email) verifiedSessions.set(token, { email, until: Date.now() + 5 * 60 * 1e3 });
-  return email;
+  const id2 = String(body.id || "").trim();
+  if (!email || !id2) return null;
+  verifiedSessions.set(token, { id: id2, email, until: Date.now() + 5 * 60 * 1e3 });
+  return { id: id2, email };
 }
 function bindAccount(req, next) {
-  emailFromToken(bearer(req)).then(
-    (email) => accounts.run(email, next),
+  const token = bearer(req);
+  identityFromToken(token).then(
+    async (identity) => {
+      try {
+        await enterStudio(identity?.id || "", token, () => accounts.run(identity?.email || "", next));
+      } catch (error) {
+        next(error);
+      }
+    },
     () => accounts.run("", next)
   );
 }

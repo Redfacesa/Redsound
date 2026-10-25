@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Arrangement } from '../shared/arrange.ts';
 import type {
   Asset,
@@ -63,6 +64,22 @@ function emptyDb(): Database {
 
 let queue: Promise<unknown> = Promise.resolve();
 
+type StudioScope = {
+  ownerId: string;
+  token: string;
+  db: Database;
+  queue: Promise<unknown>;
+};
+
+const scopes = new AsyncLocalStorage<StudioScope>();
+
+function supabaseConfig(): { url: string; key: string } | null {
+  const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+  if (!url || !key) return null;
+  return { url, key };
+}
+
 function read(): Database {
   try {
     const raw = fs.readFileSync(dbPath, 'utf8');
@@ -79,14 +96,70 @@ function write(db: Database) {
   fs.renameSync(tmp, dbPath);
 }
 
+async function loadRemote(token: string, ownerId: string): Promise<Database> {
+  const config = supabaseConfig();
+  if (!config) return emptyDb();
+  const response = await fetch(
+    `${config.url}/rest/v1/redsound_state?owner_id=eq.${encodeURIComponent(ownerId)}&select=document`,
+    { headers: { apikey: config.key, Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+  );
+  if (!response.ok) throw new Error('Could not open the studio library.');
+  const rows = await response.json() as Array<{ document?: Partial<Database> }>;
+  const document = rows[0]?.document;
+  if (!document || typeof document !== 'object') return emptyDb();
+  return { ...emptyDb(), ...document };
+}
+
+async function saveRemote(scope: StudioScope) {
+  const config = supabaseConfig();
+  if (!config) return;
+  const response = await fetch(`${config.url}/rest/v1/redsound_state`, {
+    method: 'POST',
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${scope.token}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify({
+      owner_id: scope.ownerId,
+      document: scope.db,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  if (!response.ok) throw new Error('Could not save the studio library.');
+}
+
+export async function enterStudio(ownerId: string, token: string, done: () => void) {
+  if (!ownerId || !token || !supabaseConfig()) {
+    done();
+    return;
+  }
+  const db = await loadRemote(token, ownerId);
+  scopes.run({ ownerId, token, db, queue: Promise.resolve() }, done);
+}
+
 export function update<T>(mutate: (db: Database) => T): Promise<T> {
-  const run = queue.then(() => {
-    const db = read();
-    const result = mutate(db);
-    write(db);
+  const scope = scopes.getStore();
+  if (!scope) {
+    const run = queue.then(() => {
+      const db = read();
+      const result = mutate(db);
+      write(db);
+      return result;
+    });
+    queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+  const run = scope.queue.then(async () => {
+    const result = mutate(scope.db);
+    await saveRemote(scope);
     return result;
   });
-  queue = run.then(
+  scope.queue = run.then(
     () => undefined,
     () => undefined,
   );
@@ -94,7 +167,7 @@ export function update<T>(mutate: (db: Database) => T): Promise<T> {
 }
 
 export function view(): Database {
-  return read();
+  return scopes.getStore()?.db ?? read();
 }
 
 export function uploadsDir(): string {

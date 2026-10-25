@@ -2,7 +2,7 @@ import type express from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { planAllows, planMeters, requiredPlanName, soundPlan, SOUND_PLANS, type Gate, type SoundPlanId } from '../shared/plans.ts';
 import type { SubscriptionState } from '../shared/types.ts';
-import { update, view } from './store.ts';
+import { enterStudio, update, view } from './store.ts';
 
 export class BillingError extends Error {
   code: number;
@@ -25,33 +25,42 @@ const ADMIN_EMAILS = new Set(
     .filter(Boolean),
 );
 
-const verifiedSessions = new Map<string, { email: string; until: number }>();
+const verifiedSessions = new Map<string, { id: string; email: string; until: number }>();
 
 function bearer(req: express.Request): string {
   const header = String(req.get('authorization') || '');
   return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
 }
 
-async function emailFromToken(token: string): Promise<string> {
-  if (!token) return '';
+async function identityFromToken(token: string): Promise<{ id: string; email: string } | null> {
+  if (!token) return null;
   const hit = verifiedSessions.get(token);
-  if (hit && hit.until > Date.now()) return hit.email;
+  if (hit && hit.until > Date.now()) return { id: hit.id, email: hit.email };
   const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
-  if (!base || !key) return '';
+  if (!base || !key) return null;
   const response = await fetch(`${base}/auth/v1/user`, {
     headers: { apikey: key, Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) return '';
-  const body = await response.json().catch(() => ({})) as { email?: string };
+  if (!response.ok) return null;
+  const body = await response.json().catch(() => ({})) as { id?: string; email?: string };
   const email = String(body.email || '').trim().toLowerCase();
-  if (email) verifiedSessions.set(token, { email, until: Date.now() + 5 * 60 * 1000 });
-  return email;
+  const id = String(body.id || '').trim();
+  if (!email || !id) return null;
+  verifiedSessions.set(token, { id, email, until: Date.now() + 5 * 60 * 1000 });
+  return { id, email };
 }
 
-export function bindAccount(req: express.Request, next: () => void) {
-  emailFromToken(bearer(req)).then(
-    (email) => accounts.run(email, next),
+export function bindAccount(req: express.Request, next: (error?: unknown) => void) {
+  const token = bearer(req);
+  identityFromToken(token).then(
+    async (identity) => {
+      try {
+        await enterStudio(identity?.id || '', token, () => accounts.run(identity?.email || '', next));
+      } catch (error) {
+        next(error);
+      }
+    },
     () => accounts.run('', next),
   );
 }
