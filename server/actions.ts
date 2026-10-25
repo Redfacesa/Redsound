@@ -8,6 +8,7 @@ import {
   openTask,
   patchAsset,
   rememberPersona,
+  rememberVoice,
 } from './catalog.ts';
 import { view } from './store.ts';
 import { requireAccess } from './billing.ts';
@@ -66,6 +67,24 @@ function publicAudio(asset: Asset): string {
 function text(value: unknown, max: number, fallback = ''): string {
   const raw = typeof value === 'string' ? value.trim() : fallback;
   return (raw || fallback).slice(0, max);
+}
+
+function sourceHold(durationSec?: number): Record<string, unknown> {
+  const duration = Number(durationSec);
+  return {
+    audioWeight: 0.85,
+    variety: 0,
+    weirdnessConstraint: 0.2,
+    styleWeight: 0.8,
+    ...(duration >= 10 && duration <= 360 ? { duration: Math.round(duration) } : {}),
+  };
+}
+
+function styleTags(style: string, bpm: number, musicalKey: string): string {
+  return [style, Number.isFinite(bpm) && bpm >= 40 && bpm <= 220 ? `${Math.round(bpm)} BPM` : '', musicalKey]
+    .filter(Boolean)
+    .join(', ')
+    .slice(0, 1000);
 }
 
 function taskIdOf(envelope: { data?: { taskId?: string; task_id?: string } | null }): string {
@@ -166,22 +185,20 @@ export function registerProduce(app: express.Express) {
       const url = publicAudio(asset);
       const bpm = Number(req.body.bpm);
       const musicalKey = text(req.body.musicalKey, 40, '');
-      const lock = [
-        Number.isFinite(bpm) && bpm >= 40 && bpm <= 220 ? `${Math.round(bpm)} BPM` : '',
-        musicalKey,
-        'same tempo, cadence and phrasing as the uploaded vocal',
-      ].filter(Boolean).join(', ');
-      const style = `${text(req.body.style, 800, 'Hip-Hop')}. ${lock}`.slice(0, 1000);
+      const style = styleTags(text(req.body.style, 200, 'Hip-Hop'), bpm, musicalKey);
       const title = text(req.body.title, 80, asset.title);
+      const lyrics = text(req.body.lyrics, 5000);
+      const voiceId = text(req.body.voiceId, 120);
       const created = await uploadCover({
         uploadUrl: url,
-        customMode: true,
         instrumental: Boolean(req.body.instrumental),
         model: text(req.body.model, 40, defaultModel()),
         callBackUrl: callbackUrl(),
         style,
         title,
-        prompt: text(req.body.lyrics, 5000),
+        ...(lyrics ? { lyrics } : {}),
+        ...(voiceId ? { personaId: voiceId, personaModel: 'voice_persona' } : {}),
+        ...sourceHold(Number(req.body.duration)),
       });
       res.status(202).json(await openTask('upload_cover', {
         parentAssetId: asset.id,
@@ -203,13 +220,16 @@ export function registerProduce(app: express.Express) {
       const asset = assetOrThrow(req.params.id);
       const created = await uploadExtend({
         uploadUrl: publicAudio(asset),
-        defaultParamFlag: true,
         model: text(req.body.model, 40, defaultModel()),
         callBackUrl: callbackUrl(),
-        continueAt: Number(req.body.continueAt ?? 30),
-        style: text(req.body.style, 1000, 'Pop'),
-        title: text(req.body.title, 80, asset.title),
-        prompt: text(req.body.lyrics, 5000),
+        continueAt: Number(req.body.continueAt ?? 1),
+        style: text(req.body.style, 1000, 'Hip-Hop'),
+        title: text(req.body.title, 100, asset.title),
+        ...(text(req.body.lyrics, 5000) ? { lyrics: text(req.body.lyrics, 5000) } : {}),
+        audioWeight: 0.85,
+        variety: 0,
+        weirdnessConstraint: 0.2,
+        styleWeight: 0.8,
       });
       res.status(202).json(await openTask('upload_extend', { parentAssetId: asset.id, title: asset.title }, taskIdOf(created)));
     } catch (error) {
@@ -225,6 +245,8 @@ export function registerProduce(app: express.Express) {
       const negativeTags = text(req.body.negativeTags, 200, 'silence');
       const title = text(req.body.title, 80, asset.title);
       if (!style) throw new SunoError(400, 'Add vocals needs a style.');
+      const lyrics = text(req.body.lyrics, 5000);
+      const voiceId = text(req.body.voiceId, 120);
       const created = await addVocals({
         uploadUrl: publicAudio(asset),
         model: text(req.body.model, 40, defaultModel()),
@@ -232,8 +254,13 @@ export function registerProduce(app: express.Express) {
         title,
         negativeTags,
         style,
-        prompt: text(req.body.lyrics, 5000),
+        ...(lyrics ? { lyrics } : {}),
+        ...(voiceId ? { personaId: voiceId, personaModel: 'voice_persona' } : {}),
         vocalGender: req.body.vocalGender === 'f' || req.body.vocalGender === 'm' ? req.body.vocalGender : undefined,
+        audioWeight: 0.85,
+        variety: 0,
+        weirdnessConstraint: 0.2,
+        styleWeight: 0.8,
       });
       res.status(202).json(await openTask('add_vocals', { parentAssetId: asset.id, title, style }, taskIdOf(created)));
     } catch (error) {
@@ -250,20 +277,20 @@ export function registerProduce(app: express.Express) {
       if (!given) throw new SunoError(400, 'Add instrumental needs tags, for example amapiano, log drum.');
       const bpm = Number(req.body.bpm);
       const musicalKey = text(req.body.musicalKey, 40, '');
-      const lock = [
-        Number.isFinite(bpm) && bpm >= 40 && bpm <= 220 ? `${Math.round(bpm)} BPM` : '',
-        musicalKey,
-        'same tempo, cadence and phrasing as the uploaded vocal',
-      ].filter(Boolean).join(', ');
-      const tags = `${given}. ${lock}`.slice(0, 1000);
+      const tags = styleTags(given, bpm, musicalKey);
+      const lyrics = text(req.body.lyrics, 5000);
       const created = await addInstrumental({
         uploadUrl: publicAudio(asset),
         model: text(req.body.model, 40, defaultModel()),
         callBackUrl: callbackUrl(),
         title,
-        negativeTags: text(req.body.negativeTags, 200, 'vocals'),
+        negativeTags: text(req.body.negativeTags, 200, 'tempo change, different song'),
         tags,
-        prompt: text(req.body.lyrics, 5000),
+        ...(lyrics ? { lyrics } : {}),
+        audioWeight: 0.9,
+        variety: 0,
+        weirdnessConstraint: 0.15,
+        styleWeight: 0.85,
       });
       res.status(202).json(await openTask('add_instrumental', {
         parentAssetId: asset.id,
@@ -382,6 +409,18 @@ export function registerProduce(app: express.Express) {
       if (!personaId) throw new SunoError(502, 'Suno did not return a persona id.');
       const provenance = await rememberPersona(asset.id, personaId);
       res.json({ personaId, provenance });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/assets/:id/voice', async (req, res, next) => {
+    try {
+      const asset = assetOrThrow(req.params.id);
+      const voiceId = text(req.body.voiceId, 120);
+      if (!voiceId) throw new SunoError(400, 'Saving a voice needs the voice id.');
+      const provenance = await rememberVoice(asset.id, voiceId);
+      res.json({ voiceId, provenance });
     } catch (error) {
       next(error);
     }

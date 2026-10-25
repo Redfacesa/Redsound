@@ -54,8 +54,9 @@ export function CreatePage() {
     const done = await pollTask(taskId, () => setJob(jobLabel(kind)));
     if (done.error) throw new Error(done.error);
     const assetId = done.assetIds[0] || done.assets.find(Boolean)?.id;
+    setJob('');
     if (assetId) navigate(`/library/${assetId}`);
-    else setJob('Ready. Open the session from Studio.');
+    else setError('That pass finished. Open it from Studio.');
   }
 
   async function generate() {
@@ -155,7 +156,7 @@ export function CreatePage() {
           <h1>New session</h1>
         </div>
       </div>
-      {job && (
+      {busy && job && (
         <div className="processing">
           <strong>{job}</strong>
           <div className="meta">{title}</div>

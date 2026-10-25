@@ -84,6 +84,7 @@ export const api = {
   wav: (id: string) => request<TaskRecord>(`/api/assets/${id}/wav`, { method: 'POST', body: '{}' }),
   midi: (id: string) => request<TaskRecord>(`/api/assets/${id}/midi`, { method: 'POST', body: '{}' }),
   persona: (id: string, body: Record<string, unknown>) => request<{ personaId: string }>(`/api/assets/${id}/persona`, { method: 'POST', body: JSON.stringify(body) }),
+  saveVoice: (id: string, voiceId: string) => request(`/api/assets/${id}/voice`, { method: 'POST', body: JSON.stringify({ voiceId }) }),
   lyricsSync: (id: string) => request<{ asset: TrackView }>(`/api/assets/${id}/lyrics-sync`, { method: 'POST', body: '{}' }),
   artwork: (id: string) => request<TaskRecord>(`/api/assets/${id}/artwork`, { method: 'POST', body: '{}' }),
   recover: (id: string) => request<TaskRecord>(`/api/assets/${id}/recover`, { method: 'POST', body: '{}' }),
@@ -142,8 +143,9 @@ export async function pollTask(taskId: string, onTick?: (status: string) => void
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const task = await api.task(taskId);
     onTick?.(task.status);
-    if (task.status === 'SUCCESS' || /FAIL|ERROR|SENSITIVE/.test(task.status)) return task;
+    if (/FAIL|ERROR|SENSITIVE/i.test(task.status) || task.status === 'SUCCESS') return task;
+    if (task.status === 'FIRST_SUCCESS' && task.assetIds.length > 0) return task;
     await new Promise((resolve) => setTimeout(resolve, 8000));
   }
-  throw new Error('Still working. Check the library again in a minute.');
+  throw new Error('This pass stopped waiting. It does not keep spending credits while the bar is up. Open the session again in a minute.');
 }

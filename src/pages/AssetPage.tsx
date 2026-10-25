@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { addVocalTake, setTrack, type Arrangement } from '@shared/arrange.ts';
 import { formatZar, originLabel } from '@shared/rights.ts';
@@ -13,7 +13,7 @@ const SPLITS = [
   { id: 'split_stem_advanced', label: 'One instrument' },
 ] as const;
 
-type Action = 'split' | 'arrange' | 'voice' | 'instruments' | 'section' | 'version' | 'artwork' | 'midi' | 'restore' | 'voice-save';
+type Action = 'split' | 'arrange' | 'voice' | 'instruments' | 'section' | 'version' | 'artwork' | 'midi' | 'restore' | 'voice-save' | 'sample';
 
 export function AssetPage() {
   const { id = '' } = useParams();
@@ -33,7 +33,11 @@ export function AssetPage() {
   const [sectionEnd, setSectionEnd] = useState(12);
   const [partnerId, setPartnerId] = useState('');
   const [voiceName, setVoiceName] = useState('');
-  const [voiceNote, setVoiceNote] = useState('');
+  const [phrase, setPhrase] = useState('');
+  const [voiceTaskId, setVoiceTaskId] = useState('');
+  const [recordingPhrase, setRecordingPhrase] = useState(false);
+  const [samplePrompt, setSamplePrompt] = useState('Soft room tone');
+  const phraseRec = useRef<MediaRecorder | null>(null);
   const [arrangement, setArrangement] = useState<Arrangement | null>(null);
   const [extraSources, setExtraSources] = useState<Record<string, string>>({});
   const [revealMaster, setRevealMaster] = useState(0);
@@ -60,12 +64,11 @@ export function AssetPage() {
       await load();
       const next = await api.arrangement(id);
       if (next) setArrangement(next);
-      setJob('Ready');
     } catch (reason) {
       setError(studioError(reason instanceof Error ? reason.message : 'The session could not finish.'));
-      setJob('');
     } finally {
       setBusy(false);
+      setJob('');
     }
   }
 
@@ -95,6 +98,100 @@ export function AssetPage() {
     }
   }
 
+  async function preparePhrase() {
+    if (!asset?.audioUrl?.startsWith('http')) {
+      setError('Record this vocal while signed in so the voice check can read it.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setJob('Preparing the phrase');
+    try {
+      const end = Math.max(8, Math.min(30, Math.round(asset.durationSec || 15)));
+      const task = await api.voiceValidate({ voiceUrl: asset.audioUrl, vocalStartS: 0, vocalEndS: end, language: 'en' });
+      const done = await pollTask(task.id);
+      if (done.status !== 'SUCCESS') throw new Error(done.error || 'The phrase did not arrive.');
+      const text = phraseOf(done.request.validateInfo);
+      if (!text) throw new Error('Suno did not return a phrase. Try a clearer part of the vocal.');
+      setPhrase(text);
+      setVoiceTaskId(done.sunoTaskId || '');
+    } catch (reason) {
+      setError(studioError(reason instanceof Error ? reason.message : 'The phrase did not arrive.'));
+    } finally {
+      setBusy(false);
+      setJob('');
+    }
+  }
+
+  async function recordPhrase() {
+    if (!asset) return;
+    if (phraseRec.current && phraseRec.current.state === 'recording') {
+      phraseRec.current.stop();
+      return;
+    }
+    if (!voiceName.trim() || !voiceTaskId) {
+      setError('Name the voice, then get the phrase.');
+      return;
+    }
+    setError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        phraseRec.current = null;
+        setRecordingPhrase(false);
+        void finishPhrase(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+      };
+      phraseRec.current = recorder;
+      recorder.start();
+      setRecordingPhrase(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The microphone did not open.');
+    }
+  }
+
+  async function finishPhrase(blob: Blob) {
+    if (!asset || !voiceTaskId) return;
+    setBusy(true);
+    setJob('Saving this voice');
+    setError('');
+    try {
+      const saved = await api.upload({
+        filename: 'phrase.webm',
+        contentType: blob.type || 'audio/webm',
+        dataBase64: await fileToBase64(new File([blob], 'phrase.webm', { type: blob.type || 'audio/webm' })),
+        title: `${voiceName} phrase`,
+        kind: 'vocal',
+        origin: 'human_created',
+        parentAssetId: asset.id,
+        bpm: asset.bpm,
+        musicalKey: asset.musicalKey,
+      });
+      if (!saved.audioUrl?.startsWith('http')) throw new Error('The phrase needs a public link. Stay signed in and record it again.');
+      const task = await api.voiceGenerate({
+        taskId: voiceTaskId,
+        verifyUrl: saved.audioUrl,
+        voiceName,
+        style,
+        description: voiceName,
+        singerSkillLevel: 'intermediate',
+      });
+      const done = await pollTask(task.id);
+      const voiceId = typeof done.request.voiceId === 'string' ? done.request.voiceId : '';
+      if (done.status !== 'SUCCESS' || !voiceId) throw new Error(done.error || 'The voice was not created.');
+      await api.saveVoice(asset.id, voiceId);
+      await load();
+    } catch (reason) {
+      setError(studioError(reason instanceof Error ? reason.message : 'The voice was not saved.'));
+    } finally {
+      setBusy(false);
+      setJob('');
+    }
+  }
+
   if (!asset) return <p className="meta">{error || 'Opening session…'}</p>;
   const openAsset = asset;
 
@@ -109,15 +206,14 @@ export function AssetPage() {
       const task = action === 'extend'
         ? await api.uploadExtend(assetId, {
           continueAt: Math.max(1, Math.round(durationSec - 0.5)),
-          style: 'Continue this recording, same voice and tempo',
+          style: style,
           title: openAsset.title,
           lyrics,
         })
         : action === 'version'
-          ? await api.cover(assetId, {
-            style: `${style}, ${tempo} BPM, ${key}. Cover this exact vocal. Keep the same tempo, cadence and phrasing.`,
+          ? await api.instrumental(assetId, {
+            tags: style,
             title: openAsset.title,
-            instrumental: false,
             lyrics,
             bpm: tempo,
             musicalKey: key,
@@ -128,7 +224,7 @@ export function AssetPage() {
             : action === 'vocals'
               ? await api.vocals(assetId, { style: style || 'Keep this recording and add a vocal', title: openAsset.title, lyrics })
               : await api.instrumental(assetId, {
-                tags: `${style}, ${tempo} BPM, ${key}, same tempo and cadence as this vocal`,
+                tags: style,
                 title: openAsset.title,
                 lyrics,
                 bpm: tempo,
@@ -136,7 +232,7 @@ export function AssetPage() {
                 single: true,
               });
       const done = await pollTask(task.id);
-      if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
+      if (done.status !== 'SUCCESS' && done.status !== 'FIRST_SUCCESS') throw new Error(done.error || 'That pass did not finish.');
       const fresh = await api.asset(id);
       setAsset(fresh);
       const incoming = [...fresh.children, ...(done.assets || []).filter((item): item is TrackView => Boolean(item))]
@@ -163,12 +259,11 @@ export function AssetPage() {
         }
       }
       if (Object.keys(urls).length) setExtraSources((current) => ({ ...current, ...urls }));
-      setJob('Ready');
     } catch (reason) {
       setError(studioError(reason instanceof Error ? reason.message : 'That pass did not finish.'));
-      setJob('');
     } finally {
       setBusy(false);
+      setJob('');
     }
   }
 
@@ -203,7 +298,7 @@ export function AssetPage() {
           <button className="btn secondary" type="button" disabled={busy} onClick={() => { void dropSession(); }}>Delete</button>
         </div>
       </div>
-      {job && (
+      {busy && job && (
         <div className="processing">
           <strong>{job}</strong>
           <div className="meta">{asset.title}</div>
@@ -270,7 +365,8 @@ export function AssetPage() {
         <button className="btn secondary" type="button" onClick={() => setAction(action === 'artwork' ? '' : 'artwork')}>Artwork</button>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => run('midi', api.midi(asset.id))}>MIDI</button>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => run('recovery', api.recover(asset.id))}>Restore</button>
-        <button className="btn secondary" type="button" onClick={() => setAction(action === 'voice-save' ? '' : 'voice-save')}>Save voice</button>
+        <button className="btn secondary" type="button" onClick={() => setAction(action === 'voice-save' ? '' : 'voice-save')}>My voice</button>
+        <button className="btn secondary" type="button" onClick={() => setAction(action === 'sample' ? '' : 'sample')}>Sample</button>
       </div>
       {action === 'split' && (
         <section className="panel stack">
@@ -355,21 +451,27 @@ export function AssetPage() {
       )}
       {action === 'voice-save' && (
         <section className="panel stack">
-          <label>Voice name<input value={voiceName} onChange={(event) => setVoiceName(event.target.value)} /></label>
-          <label>Character<input value={voiceNote} onChange={(event) => setVoiceNote(event.target.value)} /></label>
-          <button className="btn" type="button" disabled={busy} onClick={async () => {
-            setBusy(true);
-            setError('');
-            try {
-              await api.persona(asset.id, { name: voiceName, description: voiceNote, style });
-              await load();
-              setJob('Voice saved');
-            } catch (reason) {
-              setError(studioError(reason instanceof Error ? reason.message : 'The voice was not saved.'));
-            } finally {
-              setBusy(false);
-            }
-          }}>Save voice</button>
+          <p className="meta">Suno reads this vocal, gives you one phrase, and you sing that phrase back. The saved voice can be used again. It does not replace the recording on the timeline.</p>
+          {asset.provenance?.voiceId && <p className="meta">Saved voice {asset.provenance.voiceId}</p>}
+          <label>Voice name<input value={voiceName} onChange={(event) => setVoiceName(event.target.value)} placeholder="My voice" /></label>
+          <button className="btn" type="button" disabled={busy} onClick={() => { void preparePhrase(); }}>Get the phrase</button>
+          {phrase && <p className="notice">Sing this, then record it: {phrase}</p>}
+          {phrase && (
+            <button className="btn" type="button" disabled={busy || !voiceName.trim()} onClick={() => { void recordPhrase(); }}>
+              {recordingPhrase ? 'Stop and save' : 'Record the phrase'}
+            </button>
+          )}
+        </section>
+      )}
+      {action === 'sample' && (
+        <section className="panel stack">
+          <label>Sample<input value={samplePrompt} onChange={(event) => setSamplePrompt(event.target.value)} /></label>
+          <button className="btn" type="button" disabled={busy || !samplePrompt.trim()} onClick={() => run('sounds', api.sounds({
+            prompt: samplePrompt,
+            soundLoop: true,
+            soundTempo: arrangement?.bpm || asset.bpm || 120,
+            soundKey: sunoSoundKey(asset.musicalKey || ''),
+          }))}>Make this sample</button>
         </section>
       )}
       <section className="panel stack">
@@ -389,4 +491,21 @@ export function AssetPage() {
       </section>
     </div>
   );
+}
+
+function phraseOf(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+  const record = value as Record<string, unknown>;
+  for (const key of ['text', 'prompt', 'content', 'phrase', 'validateText']) {
+    const item = record[key];
+    if (typeof item === 'string' && item.trim()) return item.trim();
+  }
+  return '';
+}
+
+function sunoSoundKey(key: string): string {
+  if (key.endsWith('Minor')) return `${key.replace(' Minor', '')}m`;
+  if (key.endsWith('Major')) return key.replace(' Major', '');
+  return 'Any';
 }

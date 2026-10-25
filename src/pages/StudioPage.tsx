@@ -53,7 +53,11 @@ export function StudioPage() {
     if (!lead) return;
     api.arrangement(lead.id).then(setArrangement).catch((reason: Error) => setError(reason.message));
   }, [lead?.id]);
-  const openTasks = tasks.filter((task) => task.status !== 'SUCCESS' && !/FAIL|ERROR|SENSITIVE/.test(task.status));
+  const openTasks = tasks.filter((task) => {
+    if (task.status === 'SUCCESS' || task.status === 'FIRST_SUCCESS' || /FAIL|ERROR|SENSITIVE/.test(task.status)) return false;
+    const age = Date.now() - new Date(task.updatedAt || task.createdAt).getTime();
+    return age < 12 * 60 * 1000;
+  });
 
   async function shapeTake(action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) {
     if (!lead || !session) return;
@@ -66,15 +70,14 @@ export function StudioPage() {
       const task = action === 'extend'
         ? await api.uploadExtend(assetId, {
           continueAt: Math.max(1, Math.round(durationSec - 0.5)),
-          style: 'Continue this recording, same voice and tempo',
+          style: genre,
           title: lead.title,
           lyrics: '',
         })
         : action === 'version'
-          ? await api.cover(assetId, {
-            style: `${genre}, ${tempo} BPM, ${key}. Cover this exact vocal. Keep the same tempo, cadence and phrasing.`,
+          ? await api.instrumental(assetId, {
+            tags: genre,
             title: lead.title,
-            instrumental: false,
             lyrics: '',
             bpm: tempo,
             musicalKey: key,
@@ -85,7 +88,7 @@ export function StudioPage() {
             : action === 'vocals'
               ? await api.vocals(assetId, { style: 'Keep this recording and add a vocal', title: lead.title, lyrics: '' })
               : await api.instrumental(assetId, {
-                tags: `${genre}, ${tempo} BPM, ${key}, same tempo and cadence as this vocal`,
+                tags: genre,
                 title: lead.title,
                 lyrics: '',
                 bpm: tempo,
@@ -93,7 +96,7 @@ export function StudioPage() {
                 single: true,
               });
       const done = await pollTask(task.id);
-      if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
+      if (done.status !== 'SUCCESS' && done.status !== 'FIRST_SUCCESS') throw new Error(done.error || 'That pass did not finish.');
       const nextSessions = await api.projects();
       setSessions(nextSessions);
       const fresh = nextSessions.find((item) => item.id === session.id);
