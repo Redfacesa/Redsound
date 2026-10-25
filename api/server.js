@@ -181,6 +181,34 @@ function seedArrangement(id2, bpm, assets, newId = () => crypto.randomUUID()) {
     }))
   }, newId);
 }
+function blankArrangement(id2, bpm, newId = () => crypto.randomUUID()) {
+  const tempo = bpm > 0 ? bpm : 120;
+  const bar = 60 / tempo * 4;
+  const span = bar * 4;
+  const names = ["Intro", "Verse", "Chorus", "Outro"];
+  const lane = (name) => ({
+    id: newId(),
+    name,
+    assetId: id2,
+    muted: false,
+    solo: false,
+    volume: 0.85,
+    pan: 0,
+    clips: []
+  });
+  return ensureMixer({
+    id: id2,
+    bpm: tempo,
+    snap: "bar",
+    tracks: [lane("VOCAL"), lane("BEAT")],
+    sections: names.map((name, index) => ({
+      id: newId(),
+      name,
+      startSec: index * span,
+      endSec: (index + 1) * span
+    }))
+  }, newId);
+}
 function effectChain(newId) {
   return EFFECT_TYPES.map((type) => ({ id: newId(), type, enabled: false, amount: 0.45 }));
 }
@@ -676,6 +704,7 @@ __export(catalog_exports, {
   hostedAudioUrl: () => hostedAudioUrl,
   marketplaceLive: () => marketplaceLive,
   mediaPath: () => mediaPath,
+  openSession: () => openSession,
   openTask: () => openTask,
   patchAsset: () => patchAsset,
   prepareListing: () => prepareListing,
@@ -953,6 +982,31 @@ function studioSessions(db) {
     });
   }
   return sessions;
+}
+async function openSession(input) {
+  return update((db) => {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const assetId = id();
+    const title = input.title.trim().slice(0, 80) || "Untitled session";
+    const bpm = input.bpm > 0 ? input.bpm : 120;
+    const musicalKey = input.musicalKey.trim().slice(0, 16) || "C Minor";
+    db.assets.unshift({
+      id: assetId,
+      ownerId: db.profile.id,
+      title,
+      kind: "vocal",
+      bpm,
+      musicalKey,
+      parentAssetIds: [],
+      createdAt: now
+    });
+    const project = createProject(db, title, [assetId]);
+    db.arrangements.unshift(blankArrangement(assetId, bpm));
+    return {
+      ...project,
+      assets: [trackView(db, assetId)].filter((asset) => Boolean(asset))
+    };
+  });
 }
 function stemFilesFromPayload(payload) {
   const root = payload && typeof payload === "object" ? payload : {};
@@ -1320,8 +1374,10 @@ function sessionAssets(db, assetId) {
   return [...ids].map((id2) => db.assets.find((item) => item.id === id2)).filter((item) => Boolean(item));
 }
 function readArrangement(db, assetId) {
+  if (!db.assets.some((asset) => asset.id === assetId)) return null;
   const assets = sessionAssets(db, assetId).filter((asset) => asset.audioUrl || asset.kind === "lyrics");
-  if (assets.length === 0) return null;
+  const stored = (db.arrangements || []).find((item) => item.id === assetId);
+  if (assets.length === 0) return stored ? ensureMixer(stored) : null;
   const bpm = assets.find((asset) => asset.bpm)?.bpm || 120;
   const seeded = seedArrangement(assetId, bpm, assets.map((asset) => ({
     id: asset.id,
@@ -1330,7 +1386,6 @@ function readArrangement(db, assetId) {
     durationSec: asset.durationSec,
     kind: asset.kind
   })));
-  const stored = (db.arrangements || []).find((item) => item.id === assetId);
   return ensureMixer(stored ? mergeNewTracks(stored, seeded) : seeded);
 }
 async function saveArrangement(assetId, arrangement) {
@@ -2432,6 +2487,14 @@ app.post("/api/listings/:id/purchase", async (req, res, next) => {
 });
 app.get("/api/projects", (_req, res) => {
   res.json(studioSessions(view()));
+});
+app.post("/api/projects", (req, res, next) => {
+  const bpm = Number(req.body.bpm);
+  openSession({
+    title: String(req.body.title || ""),
+    bpm: Number.isFinite(bpm) ? bpm : 120,
+    musicalKey: String(req.body.musicalKey || "C Minor")
+  }).then((session) => res.status(201).json(session)).catch(next);
 });
 app.get("/api/rights", (_req, res) => {
   const db = view();

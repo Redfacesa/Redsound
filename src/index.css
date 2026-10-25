@@ -210,6 +210,8 @@ input:focus, textarea:focus, select:focus { border-color: #8d4a42; }
 .split { display: grid; grid-template-columns: 1.4fr 1fr 90px auto; gap: 8px; align-items: center; }
 
 .session-layout { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
+.session-new { display: grid; gap: 8px; margin-top: 12px; }
+.session-tempo { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
 .session-list { display: grid; gap: 4px; }
 .session-item {
   display: grid;
@@ -316,8 +318,17 @@ audio.bare { width: 100%; }
 .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 
 .tl { display: grid; gap: 8px; outline: none; }
-.tl-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.tl-clock { font-family: "IBM Plex Mono", monospace; font-size: 13px; min-width: 52px; }
+.tl-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: #0c0e12;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.tl-clock { font-family: "IBM Plex Mono", monospace; font-size: 22px; letter-spacing: 0.06em; min-width: 92px; color: #f3efe4; }
 .tl-inline { display: flex; gap: 6px; align-items: center; text-transform: none; letter-spacing: 0; font-size: 12px; }
 .tl-inline select { padding: 4px 8px; }
 .tl-edit { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -357,9 +368,10 @@ audio.bare { width: 100%; }
 }
 .tl-lane {
   position: relative;
+  background-color: #10141c;
   background-image:
-    linear-gradient(90deg, transparent calc(100% - 1px), rgba(255,255,255,0.04) calc(100% - 1px)),
-    linear-gradient(90deg, transparent calc(100% - 1px), rgba(226,59,47,0.28) calc(100% - 1px));
+    linear-gradient(90deg, transparent calc(100% - 1px), rgba(255,255,255,0.05) calc(100% - 1px)),
+    linear-gradient(90deg, transparent calc(100% - 1px), rgba(226,59,47,0.35) calc(100% - 1px));
   background-repeat: repeat;
 }
 .tl-select { position: absolute; top: 0; bottom: 0; background: rgba(226, 59, 47, 0.16); border-left: 1px solid var(--red); border-right: 1px solid var(--red); pointer-events: none; }

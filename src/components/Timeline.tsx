@@ -33,6 +33,7 @@ import { buildDesk, scheduleArrangement } from '../lib/mix';
 import { clock } from '../lib/studio';
 
 const HEAD = 188;
+const LANE_COLORS = ['#8d3a32', '#c4a15a', '#c9b84a', '#3f8f86', '#4d6ea8', '#8a6aad', '#c46b4a'];
 
 function initialZoom(arrangement: Arrangement): number {
   const longest = arrangement.tracks.reduce((max, track) => (
@@ -764,6 +765,7 @@ export function Timeline({
                     key={clip.id}
                     clip={clip}
                     px={pxPerSec}
+                    color={LANE_COLORS[draft.tracks.indexOf(track) % LANE_COLORS.length]}
                     buffer={buffers.current.get(clip.assetId)}
                     version={waveVersion}
                     onPointerDown={(event, mode) => {
@@ -843,12 +845,14 @@ const ROLES: ChannelRole[] = ['lead', 'backing', 'adlib', 'double', 'beat', 'bas
 function ClipView({
   clip,
   px,
+  color,
   buffer,
   version,
   onPointerDown,
 }: {
   clip: Clip;
   px: number;
+  color: string;
   buffer?: AudioBuffer;
   version: number;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, mode: 'move' | 'start' | 'end' | 'fade-in' | 'fade-out') => void;
@@ -864,7 +868,7 @@ function ClipView({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#e7b2a4';
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
     const data = buffer?.getChannelData(0);
     if (!data || !buffer) {
       ctx.fillRect(0, canvas.height * 0.35, canvas.width, canvas.height * 0.3);
@@ -888,7 +892,7 @@ function ClipView({
       className="clip"
       role="button"
       aria-label={clip.name}
-      style={{ left: clip.startSec * px, width }}
+      style={{ left: clip.startSec * px, width, background: color, borderColor: color }}
       onPointerDown={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - bounds.left;

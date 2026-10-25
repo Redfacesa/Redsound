@@ -138,6 +138,35 @@ export function seedArrangement(
   }, newId);
 }
 
+export function blankArrangement(id: string, bpm: number, newId: () => string = () => crypto.randomUUID()): Arrangement {
+  const tempo = bpm > 0 ? bpm : 120;
+  const bar = (60 / tempo) * 4;
+  const span = bar * 4;
+  const names = ['Intro', 'Verse', 'Chorus', 'Outro'];
+  const lane = (name: string): ArrangeTrack => ({
+    id: newId(),
+    name,
+    assetId: id,
+    muted: false,
+    solo: false,
+    volume: 0.85,
+    pan: 0,
+    clips: [],
+  });
+  return ensureMixer({
+    id,
+    bpm: tempo,
+    snap: 'bar',
+    tracks: [lane('VOCAL'), lane('BEAT')],
+    sections: names.map((name, index) => ({
+      id: newId(),
+      name,
+      startSec: index * span,
+      endSec: (index + 1) * span,
+    })),
+  }, newId);
+}
+
 const EFFECT_TYPES: EffectType[] = ['eq', 'compressor', 'de-esser', 'saturation', 'reverb', 'delay'];
 
 function effectChain(newId: () => string): ChannelEffect[] {

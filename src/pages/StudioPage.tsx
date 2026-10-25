@@ -4,7 +4,7 @@ import type { Arrangement } from '@shared/arrange.ts';
 import type { TaskRecord, TrackView } from '@shared/types.ts';
 import { Timeline } from '../components/Timeline';
 import { api, fileToBase64 } from '../lib/api';
-import { jobLabel, studioError } from '../lib/studio';
+import { KEYS, jobLabel, studioError } from '../lib/studio';
 
 type Session = { id: string; title: string; createdAt?: string; assets: TrackView[] };
 
@@ -18,6 +18,24 @@ export function StudioPage() {
   const [extraSources, setExtraSources] = useState<Record<string, string>>({});
   const [revealMaster, setRevealMaster] = useState(0);
   const [bounceSignal, setBounceSignal] = useState(0);
+  const [title, setTitle] = useState('First song');
+  const [bpm, setBpm] = useState(120);
+  const [musicalKey, setMusicalKey] = useState<(typeof KEYS)[number]>('C Minor');
+  const [opening, setOpening] = useState(false);
+
+  async function startSession() {
+    setOpening(true);
+    setError('');
+    try {
+      const session = await api.openSession({ title, bpm, musicalKey });
+      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+      setSelected(session.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The session did not open.');
+    } finally {
+      setOpening(false);
+    }
+  }
 
   useEffect(() => {
     api.projects().then((next) => {
@@ -40,6 +58,25 @@ export function StudioPage() {
     <div className="session-layout">
       <aside className="panel">
         <h2>Sessions</h2>
+        <form className="session-new" onSubmit={(event) => { event.preventDefault(); void startSession(); }}>
+          <label>
+            Song
+            <input value={title} onChange={(event) => setTitle(event.target.value)} required />
+          </label>
+          <div className="session-tempo">
+            <label>
+              BPM
+              <input type="number" min={40} max={220} value={bpm} onChange={(event) => setBpm(Number(event.target.value))} />
+            </label>
+            <label>
+              Key
+              <select value={musicalKey} onChange={(event) => setMusicalKey(event.target.value as (typeof KEYS)[number])}>
+                {KEYS.map((key) => <option key={key}>{key}</option>)}
+              </select>
+            </label>
+          </div>
+          <button className="btn" type="submit" disabled={opening}>{opening ? 'Opening' : 'New session'}</button>
+        </form>
         <div className="session-list" style={{ marginTop: 10 }}>
           {sessions.length === 0 && <p className="meta">No sessions yet. Start one from New.</p>}
           {sessions.map((item) => (
@@ -64,9 +101,7 @@ export function StudioPage() {
               <div>
                 <h1>{session.title}</h1>
                 <div className="session-meta">
-                  {lead.provenance?.style?.split(',')[0] || lead.kind}
-                  {lead.bpm ? ` · ${lead.bpm} BPM` : ''}
-                  {lead.musicalKey ? ` · ${lead.musicalKey}` : ''}
+                  {lead.bpm || arrangement?.bpm || 120} BPM · 4/4 · {lead.musicalKey || 'C Minor'}
                   {session.createdAt ? ` · ${new Date(session.createdAt).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
                 </div>
               </div>
@@ -134,7 +169,7 @@ export function StudioPage() {
         ) : (
           <section className="panel">
             <h3>Open a session</h3>
-            <p className="meta">Create a beat, import a recording, or pick a session on the left.</p>
+            <p className="meta">Name the song, set the tempo and key, then record into the vocal lane. A generated beat can come in later. It does not have to start the session.</p>
           </section>
         )}
       </div>

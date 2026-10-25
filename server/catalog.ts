@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Database } from './store.ts';
 import { update, uploadsDir } from './store.ts';
-import { ensureMixer, mergeNewTracks, seedArrangement, type Arrangement } from '../shared/arrange.ts';
+import { blankArrangement, ensureMixer, mergeNewTracks, seedArrangement, type Arrangement } from '../shared/arrange.ts';
 import { defaultOffers, deriveOrigin, listingBlockers, platformFee } from '../shared/rights.ts';
 import type {
   Asset,
@@ -319,6 +319,32 @@ export function studioSessions(db: Database) {
     });
   }
   return sessions;
+}
+
+export async function openSession(input: { title: string; bpm: number; musicalKey: string }) {
+  return update((db) => {
+    const now = new Date().toISOString();
+    const assetId = id();
+    const title = input.title.trim().slice(0, 80) || 'Untitled session';
+    const bpm = input.bpm > 0 ? input.bpm : 120;
+    const musicalKey = input.musicalKey.trim().slice(0, 16) || 'C Minor';
+    db.assets.unshift({
+      id: assetId,
+      ownerId: db.profile.id,
+      title,
+      kind: 'vocal',
+      bpm,
+      musicalKey,
+      parentAssetIds: [],
+      createdAt: now,
+    });
+    const project = createProject(db, title, [assetId]);
+    db.arrangements.unshift(blankArrangement(assetId, bpm));
+    return {
+      ...project,
+      assets: [trackView(db, assetId)].filter((asset): asset is TrackView => Boolean(asset)),
+    };
+  });
 }
 
 export interface StemFile {
@@ -709,8 +735,10 @@ function sessionAssets(db: Database, assetId: string) {
 }
 
 export function readArrangement(db: Database, assetId: string): Arrangement | null {
+  if (!db.assets.some((asset) => asset.id === assetId)) return null;
   const assets = sessionAssets(db, assetId).filter((asset) => asset.audioUrl || asset.kind === 'lyrics');
-  if (assets.length === 0) return null;
+  const stored = (db.arrangements || []).find((item) => item.id === assetId);
+  if (assets.length === 0) return stored ? ensureMixer(stored) : null;
   const bpm = assets.find((asset) => asset.bpm)?.bpm || 120;
   const seeded = seedArrangement(assetId, bpm, assets.map((asset) => ({
     id: asset.id,
@@ -719,7 +747,6 @@ export function readArrangement(db: Database, assetId: string): Arrangement | nu
     durationSec: asset.durationSec,
     kind: asset.kind,
   })));
-  const stored = (db.arrangements || []).find((item) => item.id === assetId);
   return ensureMixer(stored ? mergeNewTracks(stored, seeded) : seeded);
 }
 

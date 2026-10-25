@@ -20,10 +20,10 @@ export function LandingPage() {
       </header>
       <section className="gate-hero">
         <p className="kicker">Red Sound</p>
-        <h1>A studio for the whole record.</h1>
+        <h1>Record anywhere. Sound studio-ready.</h1>
         <p className="lede">
-          Write a beat, put a voice on it, split the stems, and keep the session in the room.
-          Red Sound is the production desk. Redface Pay is how a subscription opens it.
+          Open a session, record the vocal, and arrange it on the timeline. The original take stays untouched.
+          A generated beat can join the session later. It does not have to start the song.
         </p>
         <div className="row">
           <Link className="btn" to={signedIn ? '/studio' : '/login'}>{signedIn ? 'Enter studio' : 'Sign in'}</Link>

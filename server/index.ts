@@ -10,6 +10,7 @@ import {
   openTask,
   prepareListing,
   studioSessions,
+  openSession,
   publicConfig,
   purchase,
   readArrangement,
@@ -407,6 +408,15 @@ app.post('/api/listings/:id/purchase', async (req, res, next) => {
 
 app.get('/api/projects', (_req, res) => {
   res.json(studioSessions(view()));
+});
+
+app.post('/api/projects', (req, res, next) => {
+  const bpm = Number(req.body.bpm);
+  openSession({
+    title: String(req.body.title || ''),
+    bpm: Number.isFinite(bpm) ? bpm : 120,
+    musicalKey: String(req.body.musicalKey || 'C Minor'),
+  }).then((session) => res.status(201).json(session)).catch(next);
 });
 
 app.get('/api/rights', (_req, res) => {
