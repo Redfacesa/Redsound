@@ -137,6 +137,7 @@ export function Timeline({
   const audioRef = useRef<AudioContext | null>(null);
   const buffers = useRef(new Map<string, AudioBuffer>());
   const durations = useRef<Record<string, number>>({});
+  const missing = useRef(new Set<string>());
   const nodes = useRef<AudioBufferSourceNode[]>([]);
   const startedAt = useRef(0);
   const offsetAt = useRef(0);
@@ -184,15 +185,21 @@ export function Timeline({
     void (async () => {
       const found: Record<string, number> = {};
       for (const [assetId, url] of Object.entries(sources)) {
-        if (!url || buffers.current.has(assetId)) continue;
+        if (!url || buffers.current.has(assetId) || missing.current.has(assetId)) continue;
         try {
           const response = await fetch(url);
+          if (!response.ok) {
+            missing.current.add(assetId);
+            found[assetId] = 0;
+            continue;
+          }
           const copy = (await response.arrayBuffer()).slice(0);
           const audio = await ctx.decodeAudioData(copy);
           if (cancel) return;
           buffers.current.set(assetId, audio);
           found[assetId] = audio.duration;
         } catch {
+          missing.current.add(assetId);
           found[assetId] = durations.current[assetId] || 0;
         }
       }
@@ -352,15 +359,19 @@ export function Timeline({
     const existing = buffers.current.get(assetId);
     if (existing) return existing;
     const url = sources[assetId];
-    if (!url) return null;
+    if (!url || missing.current.has(assetId)) return null;
     try {
       const response = await fetch(url);
-      if (!response.ok) return null;
+      if (!response.ok) {
+        missing.current.add(assetId);
+        return null;
+      }
       const audio = await context().decodeAudioData((await response.arrayBuffer()).slice(0));
       buffers.current.set(assetId, audio);
       durations.current[assetId] = audio.duration;
       return audio;
     } catch {
+      missing.current.add(assetId);
       return null;
     }
   }
