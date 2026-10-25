@@ -73,6 +73,12 @@ type StudioScope = {
 
 const scopes = new AsyncLocalStorage<StudioScope>();
 
+export function studioAuth(): { ownerId: string; token: string } | null {
+  const scope = scopes.getStore();
+  if (!scope?.ownerId || !scope.token) return null;
+  return { ownerId: scope.ownerId, token: scope.token };
+}
+
 function supabaseConfig(): { url: string; key: string } | null {
   const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();

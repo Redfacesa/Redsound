@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Arrangement } from '@shared/arrange.ts';
+import { addVocalTake, type Arrangement } from '@shared/arrange.ts';
 import type { TaskRecord, TrackView } from '@shared/types.ts';
 import { Timeline } from '../components/Timeline';
-import { api, fileToBase64 } from '../lib/api';
+import { api, fileToBase64, pollTask } from '../lib/api';
 import { KEYS, jobLabel, studioError } from '../lib/studio';
 
 type Session = { id: string; title: string; createdAt?: string; assets: TrackView[] };
@@ -53,6 +53,60 @@ export function StudioPage() {
     api.arrangement(lead.id).then(setArrangement).catch((reason: Error) => setError(reason.message));
   }, [lead?.id]);
   const openTasks = tasks.filter((task) => task.status !== 'SUCCESS' && !/FAIL|ERROR|SENSITIVE/.test(task.status));
+
+  async function shapeTake(action: 'extend' | 'version' | 'separate', assetId: string, durationSec: number) {
+    if (!lead || !session) return;
+    setError('');
+    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : 'Separating this recording';
+    setJob(label);
+    try {
+      const task = action === 'extend'
+        ? await api.uploadExtend(assetId, {
+          continueAt: Math.max(1, Math.round(durationSec - 0.5)),
+          style: 'Continue this recording, same voice and tempo',
+          title: lead.title,
+          lyrics: '',
+        })
+        : action === 'version'
+          ? await api.cover(assetId, {
+            style: 'A new arrangement of this recording, keep the performance',
+            title: lead.title,
+            instrumental: false,
+            lyrics: '',
+          })
+          : await api.stems(assetId, { type: 'separate_vocal' });
+      const done = await pollTask(task.id);
+      if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
+      const nextSessions = await api.projects();
+      setSessions(nextSessions);
+      const fresh = nextSessions.find((item) => item.id === session.id);
+      if (arrangement && fresh) {
+        let next = arrangement;
+        const added: Record<string, string> = {};
+        for (const asset of fresh.assets) {
+          if (!asset.audioUrl) continue;
+          const present = next.tracks.some((track) => track.assetId === asset.id || track.clips.some((clip) => clip.assetId === asset.id));
+          if (present) continue;
+          next = addVocalTake(next, {
+            assetId: asset.id,
+            title: asset.title,
+            durationSec: asset.durationSec || 30,
+            startSec: 0,
+          });
+          added[asset.id] = asset.audioUrl;
+        }
+        if (next !== arrangement) {
+          setArrangement(next);
+          void api.saveArrangement(lead.id, next);
+        }
+        if (Object.keys(added).length) setExtraSources((sources) => ({ ...sources, ...added }));
+      }
+      setJob('');
+    } catch (reason) {
+      setError(studioError(reason instanceof Error ? reason.message : 'That pass failed.'));
+      setJob('');
+    }
+  }
 
   return (
     <div className="session-layout">
@@ -144,8 +198,11 @@ export function StudioPage() {
                     fullLyrics: '',
                   }).then(() => setJob('Replacing section')).catch((reason: Error) => { setError(studioError(reason.message)); setJob(''); });
                 }}
+                onShape={(action, assetId, durationSec) => { void shapeTake(action, assetId, durationSec); }}
                 onCapture={async (input) => {
-                  const file = new File([input.blob], `${input.title}.webm`, { type: input.blob.type || 'audio/webm' });
+                  const type = input.blob.type || 'audio/webm';
+                  const ext = type.includes('wav') ? 'wav' : 'webm';
+                  const file = new File([input.blob], `take.${ext}`, { type });
                   const saved = await api.upload({
                     filename: file.name,
                     contentType: file.type,

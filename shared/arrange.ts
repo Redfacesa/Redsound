@@ -651,7 +651,7 @@ export function addSection(arrangement: Arrangement, name: string, startSec: num
   };
 }
 
-export function setTrack(arrangement: Arrangement, trackId: string, patch: Partial<Pick<ArrangeTrack, 'muted' | 'solo' | 'volume' | 'pan'>>): Arrangement {
+export function setTrack(arrangement: Arrangement, trackId: string, patch: Partial<Pick<ArrangeTrack, 'name' | 'muted' | 'solo' | 'volume' | 'pan'>>): Arrangement {
   return {
     ...arrangement,
     tracks: arrangement.tracks.map((track) => track.id === trackId ? { ...track, ...patch } : track),

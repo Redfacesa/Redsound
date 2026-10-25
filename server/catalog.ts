@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Database } from './store.ts';
-import { update, uploadsDir } from './store.ts';
+import { studioAuth, update, uploadsDir } from './store.ts';
 import { blankArrangement, ensureMixer, mergeNewTracks, seedArrangement, type Arrangement } from '../shared/arrange.ts';
 import { defaultOffers, deriveOrigin, listingBlockers, platformFee } from '../shared/rights.ts';
 import type {
@@ -198,6 +198,15 @@ export async function saveUpload(input: {
   const mediaId = id();
   const ext = path.extname(input.filename || '').slice(0, 8) || '.bin';
   fs.writeFileSync(path.join(uploadsDir(), `${mediaId}${ext}`), bytes);
+  const auth = studioAuth();
+  let hosted: string | undefined;
+  if (auth) {
+    try {
+      hosted = await publishRecording(auth.token, `${auth.ownerId}/${mediaId}${ext}`, bytes, input.contentType);
+    } catch {
+      hosted = undefined;
+    }
+  }
   return update((db) => {
     const now = new Date().toISOString();
     const workId = id();
@@ -225,7 +234,7 @@ export async function saveUpload(input: {
       durationSec: input.durationSec,
       mediaId,
       mimeType: input.contentType || 'application/octet-stream',
-      audioUrl: `/api/media/${mediaId}`,
+      audioUrl: hosted || `/api/media/${mediaId}`,
       workId,
       recordingId,
       projectId: parent?.projectId,
@@ -695,6 +704,24 @@ export async function completeSideTask(localId: string, status: string, extra?: 
     task.updatedAt = new Date().toISOString();
     return task;
   });
+}
+
+async function publishRecording(token: string, objectPath: string, bytes: Buffer, contentType: string): Promise<string | undefined> {
+  const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+  if (!url || !key) return undefined;
+  const response = await fetch(`${url}/storage/v1/object/redsound-audio/${objectPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: new Uint8Array(bytes),
+  });
+  if (!response.ok) return undefined;
+  return `${url}/storage/v1/object/public/redsound-audio/${objectPath}`;
 }
 
 export function hostedAudioUrl(asset: Asset): string | undefined {

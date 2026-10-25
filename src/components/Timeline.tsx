@@ -30,6 +30,7 @@ import {
 } from '@shared/arrange.ts';
 import { bounceArrangement, downloadBlob } from '../lib/bounce';
 import { buildDesk, scheduleArrangement } from '../lib/mix';
+import { encodeWav, studioVocal } from '../lib/restore';
 import { clock } from '../lib/studio';
 
 const HEAD = 188;
@@ -51,12 +52,28 @@ type Drag =
   | { kind: 'select'; origin: number }
   | { kind: 'section'; sectionId: string; origin: number; x: number };
 
+function Mark({ name }: { name: 'play' | 'pause' | 'stop' | 'record' | 'undo' | 'redo' | 'plus' | 'minus' }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      {name === 'play' && <path d="M5 3.5v9l8-4.5-8-4.5z" fill="currentColor" />}
+      {name === 'pause' && <path d="M4.5 3h2.2v10H4.5V3zm4.8 0h2.2v10H9.3V3z" fill="currentColor" />}
+      {name === 'stop' && <rect x="4" y="4" width="8" height="8" fill="currentColor" />}
+      {name === 'record' && <circle cx="8" cy="8" r="4.2" fill="currentColor" />}
+      {name === 'plus' && <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.6" />}
+      {name === 'minus' && <path d="M3.5 8h9" stroke="currentColor" strokeWidth="1.6" />}
+      {name === 'undo' && <path d="M6 5H3.5V2.5M3.8 5.2A5 5 0 1 1 4.2 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />}
+      {name === 'redo' && <path d="M10 5h2.5V2.5M12.2 5.2A5 5 0 1 0 11.8 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
 export function Timeline({
   arrangement,
   sources,
   onCommit,
   onProduce,
   onCapture,
+  onShape,
   sessionName,
   revealMaster = 0,
   bounceSignal = 0,
@@ -66,6 +83,7 @@ export function Timeline({
   onCommit: (next: Arrangement) => void;
   onProduce?: (action: 'replace' | 'extend', range: Range) => void;
   onCapture?: (input: { blob: Blob; durationSec: number; startSec: number; title: string }) => Promise<{ id: string; title: string }>;
+  onShape?: (action: 'extend' | 'version' | 'separate', assetId: string, durationSec: number) => void;
   sessionName?: string;
   revealMaster?: number;
   bounceSignal?: number;
@@ -104,6 +122,17 @@ export function Timeline({
   const playRef = useRef(playhead);
   const dragRef = useRef<Drag | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const zoomTo = useRef<(value: number) => void>(() => {});
+  zoomTo.current = (next: number) => {
+    const scroller = scrollRef.current;
+    const old = zoomRef.current;
+    const clamped = Math.max(16, Math.min(220, next));
+    if (scroller && old > 0) {
+      const screenX = HEAD + playRef.current * old - scroller.scrollLeft;
+      scroller.scrollLeft = Math.max(0, HEAD + playRef.current * clamped - screenX);
+    }
+    setPxPerSec(clamped);
+  };
   const audioRef = useRef<AudioContext | null>(null);
   const buffers = useRef(new Map<string, AudioBuffer>());
   const durations = useRef<Record<string, number>>({});
@@ -226,7 +255,7 @@ export function Timeline({
       if (!pinch || event.touches.length !== 2) return;
       event.preventDefault();
       const dist = Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY);
-      setPxPerSec(Math.max(16, Math.min(220, pinch.zoom * (dist / Math.max(pinch.dist, 1)))));
+      zoomTo.current(pinch.zoom * (dist / Math.max(pinch.dist, 1)));
     }
     function end() { pinch = null; }
     node.addEventListener('touchstart', start, { passive: true });
@@ -360,11 +389,6 @@ export function Timeline({
         return;
       }
       setPlayhead(head);
-      const scroller = scrollRef.current;
-      if (scroller) {
-        const x = HEAD + head * pxPerSec;
-        if (x > scroller.scrollLeft + scroller.clientWidth - 40) scroller.scrollLeft = x - 80;
-      }
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
@@ -427,17 +451,41 @@ export function Timeline({
         try {
           const decoded = await context().decodeAudioData((await blob.arrayBuffer()).slice(0));
           const take = draftRef.current.tracks.filter((track) => track.take).length + 1;
-          const title = `Vocal Take ${take}`;
-          const saved = await onCapture({ blob, durationSec: decoded.duration, startSec, title });
-          buffers.current.set(saved.id, decoded);
-          durations.current[saved.id] = decoded.duration;
+          let heard = decoded;
+          let heardBlob: Blob = blob;
+          try {
+            heard = await studioVocal(decoded);
+            heardBlob = encodeWav(heard);
+          } catch {
+            heard = decoded;
+            heardBlob = blob;
+          }
+          const [source, cleaned] = await Promise.all([
+            onCapture({ blob, durationSec: decoded.duration, startSec, title: `Original ${take}` }),
+            onCapture({ blob: heardBlob, durationSec: heard.duration, startSec, title: `Studio vocal ${take}` }),
+          ]);
+          buffers.current.set(source.id, decoded);
+          buffers.current.set(cleaned.id, heard);
+          durations.current[source.id] = decoded.duration;
+          durations.current[cleaned.id] = heard.duration;
           setWaveVersion((version) => version + 1);
-          commit(addVocalTake(draftRef.current, {
-            assetId: saved.id,
-            title: saved.title || title,
+          let next = addVocalTake(draftRef.current, {
+            assetId: source.id,
+            title: source.title || `Original ${take}`,
             durationSec: decoded.duration,
             startSec,
-          }));
+          });
+          next = addVocalTake(next, {
+            assetId: cleaned.id,
+            title: cleaned.title || `Studio vocal ${take}`,
+            durationSec: heard.duration,
+            startSec,
+          });
+          const originalTrack = next.tracks.find((track) => track.assetId === source.id);
+          const cleanedTrack = next.tracks.find((track) => track.assetId === cleaned.id);
+          if (originalTrack) next = setTrack(next, originalTrack.id, { muted: true, name: source.title || `Original ${take}` });
+          if (cleanedTrack) next = setTrack(next, cleanedTrack.id, { name: cleaned.title || `Studio vocal ${take}` });
+          commit(next);
           if (keepTaking.current && loopRecRef.current) {
             playRef.current = startSec;
             setPlayhead(startSec);
@@ -477,9 +525,13 @@ export function Timeline({
     try {
       const ctx = context();
       await ctx.resume();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-      });
+      const audio: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+      if (deviceId) audio.deviceId = { exact: deviceId };
+      const stream = await navigator.mediaDevices.getUserMedia({ audio });
       streamRef.current = stream;
       const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput');
       setDevices(inputs);
@@ -635,26 +687,35 @@ export function Timeline({
     marks.push(time);
     if (marks.length > 400) break;
   }
+  const shaped = draft.tracks.find((track) => track.id === selectionTrack);
+  const shapedClip = shaped?.clips[0];
+  const clipInRange = activeSelection
+    ? draft.tracks.flatMap((track) => track.clips).find((clip) => clip.startSec < activeSelection.end && clip.startSec + clip.durationSec > activeSelection.start)
+    : undefined;
 
   return (
     <section className="tl" tabIndex={0}>
       <div className="tl-bar">
-        <button className="transport-play" type="button" onClick={togglePlay}>{playing ? 'Pause' : 'Play'}</button>
-        <button className="chip" type="button" onClick={stopToStart}>Stop</button>
-        <button className="chip" type="button" onClick={() => void exportMix()}>Bounce</button>
+        <button className="tl-btn" type="button" aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}><Mark name={playing ? 'pause' : 'play'} /></button>
+        <button className="tl-btn" type="button" aria-label="Stop" onClick={stopToStart}><Mark name="stop" /></button>
+        <button className="tl-btn" type="button" aria-label="Undo" onClick={undo}><Mark name="undo" /></button>
+        <button className="tl-btn" type="button" aria-label="Redo" onClick={redo}><Mark name="redo" /></button>
+        <button className="tl-btn" type="button" aria-label="Zoom out" onClick={() => zoomTo.current(zoomRef.current / 1.25)}><Mark name="minus" /></button>
+        <button className="tl-btn" type="button" aria-label="Zoom in" onClick={() => zoomTo.current(zoomRef.current * 1.25)}><Mark name="plus" /></button>
+        <span className="tl-clock">{clock(playhead)}</span>
         {onCapture && (
           <>
             <select className="tl-mic" aria-label="Microphone" value={deviceId} onChange={(event) => setDeviceId(event.target.value)}>
               <option value="">Microphone</option>
               {devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label || 'Microphone'}</option>)}
             </select>
-            <button className={recState === 'rec' ? 'transport-rec on' : 'transport-rec'} type="button" onClick={() => void toggleRecord()}>
-              {recState === 'count' ? countBeat : recState === 'rec' ? 'Stop rec' : 'Record'}
+            <button className={recState === 'rec' ? 'tl-btn on' : 'tl-btn'} type="button" aria-label="Record" onClick={() => void toggleRecord()}>
+              {recState === 'count' ? countBeat : <Mark name="record" />}
             </button>
-            <button className={loopRec ? 'chip on' : 'chip'} type="button" onClick={() => setLoopRec((value) => !value)}>Loop rec</button>
+            <button className={loopRec ? 'tl-tool on' : 'tl-tool'} type="button" onClick={() => setLoopRec((value) => !value)}>Loop rec</button>
           </>
         )}
-        <span className="tl-clock">{clock(playhead)}</span>
+        <button className={loop ? 'tl-tool on' : 'tl-tool'} type="button" onClick={() => setLoop((value) => !value)}>Loop</button>
         <label className="tl-inline">Snap
           <select value={draft.snap} onChange={(event) => commit({ ...draft, snap: event.target.value as SnapMode })}>
             <option value="beat">Beat</option>
@@ -662,48 +723,51 @@ export function Timeline({
             <option value="off">Off</option>
           </select>
         </label>
-        <button className={loop ? 'chip on' : 'chip'} type="button" onClick={() => setLoop((value) => !value)}>Loop</button>
-        <button className="chip" type="button" onClick={() => setPxPerSec((value) => Math.max(16, value / 1.25))}>−</button>
-        <button className="chip" type="button" onClick={() => setPxPerSec((value) => Math.min(220, value * 1.25))}>+</button>
-        <button className="chip" type="button" onClick={undo}>Undo</button>
-        <button className="chip" type="button" onClick={redo}>Redo</button>
-        {activeSelection && (
-          <div className="tl-edit">
-            <button type="button" className="chip" onClick={cut}>Cut</button>
-            <button type="button" className="chip" onClick={copy}>Copy</button>
-            <button type="button" className="chip" onClick={paste} disabled={!clipboard}>Paste</button>
-            <button type="button" className="chip" onClick={split}>Split</button>
-            <button type="button" className="chip" onClick={remove}>Delete</button>
-            <button type="button" className="chip" onClick={duplicate}>Duplicate</button>
-            <button type="button" className="chip" onClick={() => commit(blendOverlaps(draft))}>Blend</button>
-            <button type="button" className="chip" onClick={tighten}>Tighten</button>
-            <label className="tl-inline">Gain
-              <input type="range" min="0" max="2" step="0.01" value={draft.tracks.flatMap((track) => track.clips).find((clip) => clip.startSec < activeSelection.end && clip.startSec + clip.durationSec > activeSelection.start)?.gain ?? 1} aria-label="Clip gain" onChange={(event) => {
-                const gain = Number(event.target.value);
-                const clips = draftRef.current.tracks.flatMap((track) => track.clips).filter((clip) => {
-                  const end = clip.startSec + clip.durationSec;
-                  return clip.startSec < activeSelection.end && end > activeSelection.start;
-                });
-                let next = draftRef.current;
-                for (const clip of clips) next = setClip(next, clip.id, { gain });
-                apply(next);
-              }} onPointerUp={finish} />
-            </label>
-            <button type="button" className="chip" onClick={() => commit(compSelection(draft, activeSelection.start, activeSelection.end))}>Comp</button>
-            <button type="button" className="chip" onClick={() => {
-              const names = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro'];
-              const used = new Set(draft.sections.map((section) => section.name));
-              const name = names.find((item) => !used.has(item)) || 'Section';
-              commit(addSection(draft, name, activeSelection.start, activeSelection.end));
-              setSelection(activeSelection);
-            }}>Section</button>
-            {onProduce && (
-              <>
-                <button type="button" className="chip" onClick={() => onProduce('replace', activeSelection)}>Replace</button>
-                <button type="button" className="chip" onClick={() => onProduce('extend', activeSelection)}>Extend</button>
-              </>
-            )}
-          </div>
+        <button className="tl-tool" type="button" onClick={() => void exportMix()}>Bounce</button>
+      </div>
+      <div className="tl-tools">
+        <button type="button" className="tl-tool" onClick={cut} disabled={!activeSelection}>Cut</button>
+        <button type="button" className="tl-tool" onClick={copy} disabled={!activeSelection}>Copy</button>
+        <button type="button" className="tl-tool" onClick={paste} disabled={!clipboard}>Paste</button>
+        <button type="button" className="tl-tool" onClick={split} disabled={!activeSelection}>Split</button>
+        <button type="button" className="tl-tool" onClick={duplicate} disabled={!activeSelection}>Duplicate</button>
+        <button type="button" className="tl-tool" onClick={remove} disabled={!activeSelection}>Delete</button>
+        <button type="button" className="tl-tool" onClick={() => commit(blendOverlaps(draft))} disabled={!activeSelection}>Blend</button>
+        <button type="button" className="tl-tool" onClick={tighten} disabled={!activeSelection}>Tighten</button>
+        <button type="button" className="tl-tool" disabled={!activeSelection} onClick={() => activeSelection && commit(compSelection(draft, activeSelection.start, activeSelection.end))}>Comp</button>
+        <button type="button" className="tl-tool" disabled={!activeSelection} onClick={() => {
+          if (!activeSelection) return;
+          const names = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro'];
+          const used = new Set(draft.sections.map((section) => section.name));
+          const name = names.find((item) => !used.has(item)) || 'Section';
+          commit(addSection(draft, name, activeSelection.start, activeSelection.end));
+          setSelection(activeSelection);
+        }}>Section</button>
+        <label className="tl-inline">Gain
+          <input className="tl-gain" type="range" min="0" max="2" step="0.01" value={clipInRange?.gain ?? 1} aria-label="Clip gain" disabled={!activeSelection} onChange={(event) => {
+            if (!activeSelection) return;
+            const gain = Number(event.target.value);
+            const clips = draftRef.current.tracks.flatMap((track) => track.clips).filter((clip) => {
+              const end = clip.startSec + clip.durationSec;
+              return clip.startSec < activeSelection.end && end > activeSelection.start;
+            });
+            let next = draftRef.current;
+            for (const clip of clips) next = setClip(next, clip.id, { gain });
+            apply(next);
+          }} onPointerUp={finish} />
+        </label>
+        {onShape && (
+          <>
+            <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('extend', shapedClip.assetId, shapedClip.durationSec)}>Extend</button>
+            <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('version', shapedClip.assetId, shapedClip.durationSec)}>New version</button>
+            <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('separate', shapedClip.assetId, shapedClip.durationSec)}>Separate</button>
+          </>
+        )}
+        {onProduce && (
+          <>
+            <button type="button" className="tl-tool" disabled={!activeSelection} onClick={() => activeSelection && onProduce('extend', activeSelection)}>Continue</button>
+            <button type="button" className="tl-tool" disabled={!activeSelection} onClick={() => activeSelection && onProduce('replace', activeSelection)}>Replace</button>
+          </>
         )}
       </div>
       <div
@@ -712,7 +776,7 @@ export function Timeline({
         onWheel={(event) => {
           if (!(event.ctrlKey || event.metaKey)) return;
           event.preventDefault();
-          setPxPerSec((value) => Math.max(16, Math.min(220, value * (event.deltaY > 0 ? 0.9 : 1.1))));
+          zoomTo.current(zoomRef.current * (event.deltaY > 0 ? 0.9 : 1.1));
         }}
       >
         <div className="tl-sheet" style={{ width: HEAD + length * pxPerSec }}>
@@ -743,8 +807,8 @@ export function Timeline({
               <div className="tl-head" onPointerDown={() => { setSelectionTrack(track.id); setSelection(null); }}>
                 <strong>{track.name}</strong>
                 <div className="tl-flags">
-                  <button type="button" className={track.muted ? 'chip on' : 'chip'} onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
-                  <button type="button" className={track.solo ? 'chip on' : 'chip'} onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { solo: !track.solo }))}>S</button>
+                  <button type="button" className={track.muted ? 'tl-flag on' : 'tl-flag'} aria-label="Mute" onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
+                  <button type="button" className={track.solo ? 'tl-flag on' : 'tl-flag'} aria-label="Solo" onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { solo: !track.solo }))}>S</button>
                 </div>
                 <input className="fader" type="range" min="0" max="1" step="0.01" value={track.volume} aria-label={`${track.name} level`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => apply(setTrack(draftRef.current, track.id, { volume: Number(event.target.value) }))} onPointerUp={finish} />
                 <input className="fader" type="range" min="-1" max="1" step="0.01" value={track.pan} aria-label={`${track.name} pan`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => apply(setTrack(draftRef.current, track.id, { pan: Number(event.target.value) }))} onPointerUp={finish} />
@@ -802,8 +866,8 @@ export function Timeline({
           <article key={channel.id} className={openChannel === channel.id ? 'strip open' : 'strip'}>
             <button type="button" className="strip-name" onClick={() => setOpenChannel((current) => current === channel.id ? '' : channel.id)}>{channel.name}</button>
             <div className="tl-flags">
-              <button type="button" className={channel.muted ? 'chip on' : 'chip'} onClick={() => commit(setChannel(draft, channel.id, { muted: !channel.muted }))}>M</button>
-              {channel.kind === 'channel' && <button type="button" className={channel.solo ? 'chip on' : 'chip'} onClick={() => commit(setChannel(draft, channel.id, { solo: !channel.solo }))}>S</button>}
+              <button type="button" className={channel.muted ? 'tl-flag on' : 'tl-flag'} aria-label="Mute" onClick={() => commit(setChannel(draft, channel.id, { muted: !channel.muted }))}>M</button>
+              {channel.kind === 'channel' && <button type="button" className={channel.solo ? 'tl-flag on' : 'tl-flag'} aria-label="Solo" onClick={() => commit(setChannel(draft, channel.id, { solo: !channel.solo }))}>S</button>}
             </div>
             {channel.kind === 'channel' && (
               <select aria-label={`${channel.name} role`} value={channel.role} onChange={(event) => {
