@@ -21,6 +21,7 @@ export function StudioPage() {
   const [title, setTitle] = useState('First song');
   const [bpm, setBpm] = useState(120);
   const [musicalKey, setMusicalKey] = useState<(typeof KEYS)[number]>('C Minor');
+  const [genre, setGenre] = useState('Hip-Hop');
   const [opening, setOpening] = useState(false);
 
   async function startSession() {
@@ -57,7 +58,9 @@ export function StudioPage() {
   async function shapeTake(action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) {
     if (!lead || !session) return;
     setError('');
-    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding instruments to this recording';
+    const tempo = arrangement?.bpm || lead.bpm || bpm;
+    const key = lead.musicalKey || musicalKey;
+    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making the song from this vocal' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding a beat under this vocal';
     setJob(label);
     try {
       const task = action === 'extend'
@@ -69,16 +72,26 @@ export function StudioPage() {
         })
         : action === 'version'
           ? await api.cover(assetId, {
-            style: 'A new arrangement of this recording, keep the performance',
+            style: `${genre}, ${tempo} BPM, ${key}. Cover this exact vocal. Keep the same tempo, cadence and phrasing.`,
             title: lead.title,
             instrumental: false,
             lyrics: '',
+            bpm: tempo,
+            musicalKey: key,
+            single: true,
           })
           : action === 'separate'
             ? await api.stems(assetId, { type: 'separate_vocal' })
             : action === 'vocals'
               ? await api.vocals(assetId, { style: 'Keep this recording and add a vocal', title: lead.title, lyrics: '' })
-              : await api.instrumental(assetId, { tags: 'Keep this recording and add instruments', title: lead.title, lyrics: '' });
+              : await api.instrumental(assetId, {
+                tags: `${genre}, ${tempo} BPM, ${key}, same tempo and cadence as this vocal`,
+                title: lead.title,
+                lyrics: '',
+                bpm: tempo,
+                musicalKey: key,
+                single: true,
+              });
       const done = await pollTask(task.id);
       if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
       const nextSessions = await api.projects();
@@ -87,10 +100,12 @@ export function StudioPage() {
       if (arrangement && fresh) {
         let next = arrangement;
         const added: Record<string, string> = {};
-        for (const asset of fresh.assets) {
-          if (!asset.audioUrl) continue;
-          const present = next.tracks.some((track) => track.assetId === asset.id || track.clips.some((clip) => clip.assetId === asset.id));
-          if (present) continue;
+        const newcomers = fresh.assets.filter((asset) => {
+          if (!asset.audioUrl) return false;
+          return !next.tracks.some((track) => track.assetId === asset.id || track.clips.some((clip) => clip.assetId === asset.id));
+        });
+        const chosen = action === 'version' || action === 'instrumental' ? newcomers.slice(0, 1) : newcomers;
+        for (const asset of chosen) {
           next = addVocalTake(next, {
             assetId: asset.id,
             title: asset.title,
@@ -99,7 +114,7 @@ export function StudioPage() {
           });
           const addedTrack = next.tracks[next.tracks.length - 1];
           if (addedTrack) next = setTrack(next, addedTrack.id, { name: asset.title });
-          added[asset.id] = asset.audioUrl;
+          if (asset.audioUrl) added[asset.id] = asset.audioUrl;
         }
         if (next !== arrangement) {
           setArrangement(next);
@@ -111,6 +126,22 @@ export function StudioPage() {
     } catch (reason) {
       setError(studioError(reason instanceof Error ? reason.message : 'That pass failed.'));
       setJob('');
+    }
+  }
+
+  async function dropSession(id: string, name: string) {
+    if (!window.confirm(`Delete “${name}” and its recordings? This cannot be undone.`)) return;
+    setError('');
+    try {
+      await api.deleteSession(id);
+      const next = sessions.filter((item) => item.id !== id);
+      setSessions(next);
+      if (selected === id) {
+        setSelected(next[0]?.id || '');
+        setArrangement(null);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The session did not delete.');
     }
   }
 
@@ -140,10 +171,13 @@ export function StudioPage() {
         <div className="session-list" style={{ marginTop: 10 }}>
           {sessions.length === 0 && <p className="meta">No sessions yet. Start one from New.</p>}
           {sessions.map((item) => (
-            <button key={item.id} type="button" className={item.id === session?.id ? 'session-item on' : 'session-item'} onClick={() => setSelected(item.id)}>
-              <strong>{item.title}</strong>
-              <small>{item.assets[0]?.bpm ? `${item.assets[0].bpm} BPM` : 'Session'}{item.assets[0]?.musicalKey ? ` · ${item.assets[0].musicalKey}` : ''}</small>
-            </button>
+            <div key={item.id} className="session-row">
+              <button type="button" className={item.id === session?.id ? 'session-item on' : 'session-item'} onClick={() => setSelected(item.id)}>
+                <strong>{item.title}</strong>
+                <small>{item.assets[0]?.bpm ? `${item.assets[0].bpm} BPM` : 'Session'}{item.assets[0]?.musicalKey ? ` · ${item.assets[0].musicalKey}` : ''}</small>
+              </button>
+              <button type="button" className="tl-btn" aria-label={`Delete ${item.title}`} onClick={() => { void dropSession(item.id, item.title); }}>×</button>
+            </div>
           ))}
         </div>
       </aside>
@@ -166,6 +200,9 @@ export function StudioPage() {
                 </div>
               </div>
               <div className="row">
+                <select aria-label="Genre" value={genre} onChange={(event) => setGenre(event.target.value)}>
+                  {['Amapiano', 'Hip-Hop', 'R&B', 'Afrobeat', 'Gospel', 'Trap', 'Pop'].map((item) => <option key={item}>{item}</option>)}
+                </select>
                 <button className="btn secondary" type="button" onClick={() => setRevealMaster((value) => value + 1)}>Master</button>
                 <button className="btn" type="button" onClick={() => setBounceSignal((value) => value + 1)}>Export</button>
                 <Link className="btn secondary" to={`/library/${lead.id}`}>Session</Link>

@@ -274,8 +274,12 @@ export async function setTaskResult(localId: string, status: string, payload: un
     task.status = status;
     task.updatedAt = new Date().toISOString();
     if (status === 'SUCCESS' || status === 'FIRST_SUCCESS') {
-      const tracks = readTracks(payload);
       const request = task.request;
+      let tracks = readTracks(payload);
+      if (request.single === true) {
+        const playable = tracks.filter((track) => track.audioUrl || track.streamAudioUrl);
+        tracks = (playable.length ? playable : tracks).slice(0, 1);
+      }
       const assets = attachGeneratedTracks(db, tracks, {
         kind: options?.kind || kindForTask(task.kind),
         origin: 'ai_generated',
@@ -328,6 +332,79 @@ export function studioSessions(db: Database) {
     });
   }
   return sessions;
+}
+
+export async function deleteSession(sessionId: string) {
+  const removed = await update((db) => {
+    const project = db.projects.find((item) => item.id === sessionId);
+    const anchor = project
+      ? project.assetIds
+      : db.assets.some((asset) => asset.id === sessionId)
+        ? [sessionId]
+        : null;
+    if (!anchor) return null;
+    const ids = new Set(anchor);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const asset of db.assets) {
+        if (ids.has(asset.id)) continue;
+        if (asset.projectId === sessionId || asset.parentAssetIds.some((parent) => ids.has(parent))) {
+          ids.add(asset.id);
+          grew = true;
+        }
+      }
+    }
+    const keptElsewhere = new Set(
+      db.projects.filter((item) => item.id !== project?.id).flatMap((item) => item.assetIds),
+    );
+    for (const assetId of [...ids]) {
+      if (keptElsewhere.has(assetId)) ids.delete(assetId);
+    }
+    const files = db.assets
+      .filter((asset) => ids.has(asset.id))
+      .map((asset) => ({ audioUrl: asset.audioUrl, mediaId: asset.mediaId }));
+    db.assets = db.assets.filter((asset) => !ids.has(asset.id));
+    if (project) db.projects = db.projects.filter((item) => item.id !== project.id);
+    db.arrangements = db.arrangements.filter((item) => !ids.has(item.id));
+    db.provenance = db.provenance.filter((item) => !ids.has(item.assetId));
+    db.recordings = db.recordings.filter((item) => !ids.has(item.assetId));
+    db.tasks = db.tasks.map((task) => ({
+      ...task,
+      assetIds: task.assetIds.filter((assetId) => !ids.has(assetId)),
+      projectId: task.projectId === sessionId ? undefined : task.projectId,
+    }));
+    return files;
+  });
+  if (!removed) return false;
+  for (const file of removed) {
+    if (file.mediaId) {
+      try {
+        const local = mediaPath(file.mediaId);
+        if (local) fs.unlinkSync(local);
+      } catch {
+        // The local copy is already gone.
+      }
+    }
+    if (file.audioUrl) await dropStored(file.audioUrl);
+  }
+  return true;
+}
+
+async function dropStored(audioUrl: string) {
+  const auth = studioAuth();
+  const base = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!auth?.token || !base || !key) return;
+  const marker = '/redsound-audio/';
+  const index = audioUrl.indexOf(marker);
+  if (index < 0) return;
+  const objectPath = decodeURIComponent(audioUrl.slice(index + marker.length).split('?')[0]);
+  if (!objectPath.startsWith(`${auth.ownerId}/`)) return;
+  await fetch(`${base}/storage/v1/object/redsound-audio/${objectPath}`, {
+    method: 'DELETE',
+    headers: { apikey: key, Authorization: `Bearer ${auth.token}` },
+  }).catch(() => undefined);
 }
 
 export async function openSession(input: { title: string; bpm: number; musicalKey: string }) {

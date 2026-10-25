@@ -8,6 +8,7 @@ import {
   moveClip,
   pasteClipboard,
   removeClip,
+  removeSection,
   removeTrack,
   seedArrangement,
   snapTime,
@@ -172,4 +173,15 @@ test('clip gain and channel solo change the mix without moving the audio', () =>
   const soloed = setChannel(gained, channelId, { solo: true, muted: false });
   assert.equal(soloed.channels?.find((channel) => channel.id === channelId)?.solo, true);
   assert.equal(soloed.tracks[0].clips[0].assetId, 'beat');
+});
+
+test('removing a section leaves every clip in place', () => {
+  seq = 0;
+  const arrangement = seedArrangement('session', 120, [{ id: 'vocal', title: 'Lead Vocal', durationSec: 8 }], id);
+  const section = arrangement.sections[0];
+  const next = removeSection(arrangement, section.id);
+  assert.equal(next.sections.some((item) => item.id === section.id), false);
+  assert.equal(next.tracks.length, arrangement.tracks.length);
+  assert.equal(next.tracks[0].clips.length, arrangement.tracks[0].clips.length);
+  assert.equal(next.tracks[0].clips[0].durationSec, arrangement.tracks[0].clips[0].durationSec);
 });

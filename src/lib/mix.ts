@@ -1,11 +1,17 @@
 import type { Arrangement, MixerChannel } from '@shared/arrange.ts';
 
-const impulses = new WeakMap<BaseAudioContext, AudioBuffer>();
+const impulses = new WeakMap<BaseAudioContext, Map<number, AudioBuffer>>();
 
-function reverbImpulse(ctx: BaseAudioContext): AudioBuffer {
-  const cached = impulses.get(ctx);
+function reverbImpulse(ctx: BaseAudioContext, seconds: number): AudioBuffer {
+  const key = Math.round(seconds * 10);
+  let cache = impulses.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    impulses.set(ctx, cache);
+  }
+  const cached = cache.get(key);
   if (cached) return cached;
-  const length = Math.floor(ctx.sampleRate * 1.6);
+  const length = Math.floor(ctx.sampleRate * seconds);
   const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
   for (let channel = 0; channel < 2; channel += 1) {
     const data = buffer.getChannelData(channel);
@@ -13,8 +19,33 @@ function reverbImpulse(ctx: BaseAudioContext): AudioBuffer {
       data[index] = (Math.random() * 2 - 1) * (1 - index / length) ** 2.4;
     }
   }
-  impulses.set(ctx, buffer);
+  cache.set(key, buffer);
   return buffer;
+}
+
+function pitchShift(ctx: BaseAudioContext, input: AudioNode, semitones: number): AudioNode {
+  const output = ctx.createGain();
+  const ratio = 2 ** (semitones / 12);
+  if (Math.abs(ratio - 1) < 0.004) {
+    input.connect(output);
+    return output;
+  }
+  const grain = 0.09;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = Math.max(0.5, Math.abs(1 - ratio) / grain);
+  for (const invert of [1, -1]) {
+    const delay = ctx.createDelay(0.2);
+    delay.delayTime.value = grain / 2;
+    const depth = ctx.createGain();
+    depth.gain.value = (grain / 2) * (ratio > 1 ? -1 : 1) * invert;
+    osc.connect(depth);
+    depth.connect(delay.delayTime);
+    input.connect(delay);
+    delay.connect(output);
+  }
+  osc.start();
+  return output;
 }
 
 function effectAmount(channel: MixerChannel, type: MixerChannel['effects'][number]['type']): number {
@@ -22,7 +53,7 @@ function effectAmount(channel: MixerChannel, type: MixerChannel['effects'][numbe
   return effect?.enabled ? effect.amount : 0;
 }
 
-export function buildDesk(ctx: BaseAudioContext, channels: MixerChannel[], destination?: AudioNode) {
+export function buildDesk(ctx: BaseAudioContext, channels: MixerChannel[], destination?: AudioNode, bpm = 120) {
   const masterChannel = channels.find((channel) => channel.kind === 'master');
   const master = ctx.createGain();
   master.gain.value = masterChannel?.muted ? 0 : masterChannel?.volume ?? 0.9;
@@ -74,6 +105,10 @@ export function buildDesk(ctx: BaseAudioContext, channels: MixerChannel[], desti
       node.connect(filter);
       node = filter;
     }
+    const tune = effectAmount(channel, 'autotune');
+    const pitch = effectAmount(channel, 'pitch');
+    const semitones = (tune > 0 ? tune * 5 : 0) + (pitch > 0 ? (pitch - 0.5) * 14 : 0);
+    if (Math.abs(semitones) > 0.05) node = pitchShift(ctx, node, semitones);
     const compression = effectAmount(channel, 'compressor');
     if (compression > 0) {
       const compressor = ctx.createDynamicsCompressor();
@@ -108,7 +143,9 @@ export function buildDesk(ctx: BaseAudioContext, channels: MixerChannel[], desti
     const delayAmount = effectAmount(channel, 'delay');
     if (delayAmount > 0) {
       const delay = ctx.createDelay(1);
-      delay.delayTime.value = 0.28;
+      const beat = 60 / Math.min(220, Math.max(40, bpm));
+      const division = delayAmount < 0.25 ? 0.5 : delayAmount < 0.7 ? 1 : 2;
+      delay.delayTime.value = Math.min(1, beat * division);
       const feedback = ctx.createGain();
       feedback.gain.value = 0.15 + delayAmount * 0.4;
       const wet = ctx.createGain();
@@ -122,7 +159,7 @@ export function buildDesk(ctx: BaseAudioContext, channels: MixerChannel[], desti
     const room = effectAmount(channel, 'reverb');
     if (room > 0) {
       const convolver = ctx.createConvolver();
-      convolver.buffer = reverbImpulse(ctx);
+      convolver.buffer = reverbImpulse(ctx, 0.25 + room * 3.5);
       const wet = ctx.createGain();
       wet.gain.value = room * 0.4;
       wetIn.connect(convolver);

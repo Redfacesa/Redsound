@@ -110,6 +110,7 @@ export const api = {
   projects: () => request<Array<Project & { assets: TrackView[] }>>('/api/projects'),
   openSession: (body: { title: string; bpm: number; musicalKey: string }) =>
     request<Project & { assets: TrackView[] }>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
+  deleteSession: (id: string) => request<{ ok: true }>(`/api/projects/${id}`, { method: 'DELETE' }),
   rights: () => request<{
     profile: Profile;
     works: Array<{ id: string; title: string; lyrics?: string; splits: TrackView['splits']; assets: TrackView[] }>;

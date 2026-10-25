@@ -164,17 +164,34 @@ export function registerProduce(app: express.Express) {
       requireSuno('upload_cover');
       const asset = assetOrThrow(req.params.id);
       const url = publicAudio(asset);
+      const bpm = Number(req.body.bpm);
+      const musicalKey = text(req.body.musicalKey, 40, '');
+      const lock = [
+        Number.isFinite(bpm) && bpm >= 40 && bpm <= 220 ? `${Math.round(bpm)} BPM` : '',
+        musicalKey,
+        'same tempo, cadence and phrasing as the uploaded vocal',
+      ].filter(Boolean).join(', ');
+      const style = `${text(req.body.style, 800, 'Hip-Hop')}. ${lock}`.slice(0, 1000);
+      const title = text(req.body.title, 80, asset.title);
       const created = await uploadCover({
         uploadUrl: url,
         customMode: true,
         instrumental: Boolean(req.body.instrumental),
         model: text(req.body.model, 40, defaultModel()),
         callBackUrl: callbackUrl(),
-        style: text(req.body.style, 1000, 'Pop'),
-        title: text(req.body.title, 80, asset.title),
+        style,
+        title,
         prompt: text(req.body.lyrics, 5000),
       });
-      res.status(202).json(await openTask('upload_cover', { parentAssetId: asset.id, title: text(req.body.title, 80, asset.title) }, taskIdOf(created)));
+      res.status(202).json(await openTask('upload_cover', {
+        parentAssetId: asset.id,
+        title,
+        style,
+        bpm: Number.isFinite(bpm) ? bpm : undefined,
+        musicalKey: musicalKey || undefined,
+        single: req.body.single !== false,
+        lyrics: text(req.body.lyrics, 5000),
+      }, taskIdOf(created)));
     } catch (error) {
       next(error);
     }
@@ -228,9 +245,17 @@ export function registerProduce(app: express.Express) {
     try {
       requireSuno('add_instrumental');
       const asset = assetOrThrow(req.params.id);
-      const tags = text(req.body.tags, 1000);
+      const given = text(req.body.tags, 800);
       const title = text(req.body.title, 80, asset.title);
-      if (!tags) throw new SunoError(400, 'Add instrumental needs tags, for example amapiano, log drum.');
+      if (!given) throw new SunoError(400, 'Add instrumental needs tags, for example amapiano, log drum.');
+      const bpm = Number(req.body.bpm);
+      const musicalKey = text(req.body.musicalKey, 40, '');
+      const lock = [
+        Number.isFinite(bpm) && bpm >= 40 && bpm <= 220 ? `${Math.round(bpm)} BPM` : '',
+        musicalKey,
+        'same tempo, cadence and phrasing as the uploaded vocal',
+      ].filter(Boolean).join(', ');
+      const tags = `${given}. ${lock}`.slice(0, 1000);
       const created = await addInstrumental({
         uploadUrl: publicAudio(asset),
         model: text(req.body.model, 40, defaultModel()),
@@ -240,7 +265,14 @@ export function registerProduce(app: express.Express) {
         tags,
         prompt: text(req.body.lyrics, 5000),
       });
-      res.status(202).json(await openTask('add_instrumental', { parentAssetId: asset.id, title, style: tags }, taskIdOf(created)));
+      res.status(202).json(await openTask('add_instrumental', {
+        parentAssetId: asset.id,
+        title,
+        style: tags,
+        bpm: Number.isFinite(bpm) ? bpm : undefined,
+        musicalKey: musicalKey || undefined,
+        single: req.body.single !== false,
+      }, taskIdOf(created)));
     } catch (error) {
       next(error);
     }

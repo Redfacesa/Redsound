@@ -14,7 +14,9 @@ import {
   moveClip,
   moveSection,
   pasteClipboard,
+  applyVocalPreset,
   removeClip,
+  removeSection,
   removeTrack,
   setChannel,
   setClip,
@@ -29,6 +31,7 @@ import {
   type Clip,
   type ClipClipboard,
   type SnapMode,
+  type VocalPreset,
 } from '@shared/arrange.ts';
 import { bounceArrangement, downloadBlob } from '../lib/bounce';
 import { buildDesk, scheduleArrangement } from '../lib/mix';
@@ -99,7 +102,7 @@ export function Timeline({
   const [selection, setSelection] = useState<Range | null>(null);
   const [selectionTrack, setSelectionTrack] = useState('');
   const [selectedClip, setSelectedClip] = useState('');
-  const [menu, setMenu] = useState<{ x: number; y: number; trackId: string; clipId: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; trackId: string; clipId: string; sectionId?: string } | null>(null);
   const [loop, setLoop] = useState(false);
   const [clipboard, setClipboard] = useState<ClipClipboard | null>(null);
   const [recState, setRecState] = useState<'idle' | 'count' | 'rec'>('idle');
@@ -417,7 +420,7 @@ export function Timeline({
     const current = draftRef.current;
     await Promise.all(current.tracks.map((track) => ensureBuffer(track.assetId)));
     if (gen !== playGen.current) return;
-    const desk = buildDesk(ctx, current.channels || []);
+    const desk = buildDesk(ctx, current.channels || [], undefined, current.bpm);
     const now = ctx.currentTime + 0.05;
     startedAt.current = now;
     offsetAt.current = from;
@@ -697,8 +700,16 @@ export function Timeline({
       return;
     }
     const range = normalized(selectionRef.current);
-    if (range) {
-      commit(deleteRange(draftRef.current, range.start, range.end, () => crypto.randomUUID(), selectionTrack || undefined));
+    const section = !selectionTrack && range
+      ? draftRef.current.sections.find((item) => Math.abs(item.startSec - range.start) < 0.05 && Math.abs(item.endSec - range.end) < 0.05)
+      : undefined;
+    if (section) {
+      commit(removeSection(draftRef.current, section.id));
+      setSelection(null);
+      return;
+    }
+    if (range && selectionTrack) {
+      commit(deleteRange(draftRef.current, range.start, range.end, () => crypto.randomUUID(), selectionTrack));
       setSelection(null);
       return;
     }
@@ -872,7 +883,7 @@ export function Timeline({
         {onShape && (
           <>
             <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('extend', shapedClip.assetId, shapedClip.durationSec)}>Extend</button>
-            <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('version', shapedClip.assetId, shapedClip.durationSec)}>New version</button>
+            <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('version', shapedClip.assetId, shapedClip.durationSec)}>Make the song</button>
             <button type="button" className="tl-tool" disabled={!shapedClip} onClick={() => shapedClip && onShape('separate', shapedClip.assetId, shapedClip.durationSec)}>Separate</button>
           </>
         )}
@@ -912,8 +923,19 @@ export function Timeline({
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     setSelectionTrack('');
+                    setSelectedClip('');
+                    clipPick.current = '';
                     setSelection({ start: section.startSec, end: section.endSec });
                     dragRef.current = { kind: 'section', sectionId: section.id, origin: section.startSec, x: event.clientX };
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelectionTrack('');
+                    setSelectedClip('');
+                    clipPick.current = '';
+                    setSelection({ start: section.startSec, end: section.endSec });
+                    setMenu({ x: event.clientX, y: event.clientY, trackId: '', clipId: '', sectionId: section.id });
                   }}
                 >{section.name}</button>
               ))}
@@ -1027,10 +1049,27 @@ export function Timeline({
             <input className="fader" type="range" min="-1" max="1" step="0.01" value={channel.pan} aria-label={`${channel.name} pan`} onChange={(event) => apply(setChannel(draftRef.current, channel.id, { pan: Number(event.target.value) }))} onPointerUp={finish} />
             {openChannel === channel.id && (
               <div className="strip-fx">
+                {channel.kind === 'channel' && (
+                  <select aria-label={`${channel.name} preset`} defaultValue="" onChange={(event) => {
+                    const preset = event.target.value as VocalPreset;
+                    if (!preset) return;
+                    commit(applyVocalPreset(draftRef.current, channel.id, preset));
+                    event.target.value = '';
+                  }}>
+                    <option value="">Preset</option>
+                    <option value="natural">Natural vocal</option>
+                    <option value="hard-tune">Hard tune</option>
+                    <option value="booth">Vocal booth</option>
+                    <option value="studio">Studio</option>
+                    <option value="hall">Concert hall</option>
+                    <option value="stage">Live stage</option>
+                    <option value="slap">Slap delay</option>
+                  </select>
+                )}
                 {channel.effects.map((effect) => (
                   <label key={effect.id}>
                     <input type="checkbox" checked={effect.enabled} onChange={(event) => commit(setEffect(draft, channel.id, effect.type, { enabled: event.target.checked }))} />
-                    {effect.type}
+                    {effect.type === 'autotune' ? 'Tune' : effect.type === 'de-esser' ? 'De-ess' : effect.type === 'eq' ? 'EQ' : effect.type}
                     <input type="range" min="0" max="1" step="0.01" value={effect.amount} aria-label={`${channel.name} ${effect.type}`} onChange={(event) => apply(setEffect(draftRef.current, channel.id, effect.type, { amount: Number(event.target.value) }))} onPointerUp={finish} />
                   </label>
                 ))}
@@ -1041,6 +1080,11 @@ export function Timeline({
           </article>
         ))}
       </div>
+      {menu?.sectionId && (
+        <div className="tl-menu" ref={menuRef} style={{ left: menu.x, top: menu.y }} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" onClick={() => { const sectionId = menu.sectionId || ''; setMenu(null); commit(removeSection(draft, sectionId)); setSelection(null); }}>Delete section</button>
+        </div>
+      )}
       {menu && menuTrack && (
         <div className="tl-menu" ref={menuRef} style={{ left: menu.x, top: menu.y }} onPointerDown={(event) => event.stopPropagation()}>
           <button type="button" onClick={() => { setMenu(null); remove(); }}>{menuClip ? 'Delete clip' : 'Delete track'}</button>
@@ -1051,7 +1095,7 @@ export function Timeline({
             <>
               <hr />
               <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('extend', clip.assetId, clip.durationSec); }}>Extend</button>
-              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('version', clip.assetId, clip.durationSec); }}>New version</button>
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('version', clip.assetId, clip.durationSec); }}>Make the song</button>
               <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('separate', clip.assetId, clip.durationSec); }}>Separate vocals</button>
               <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('vocals', clip.assetId, clip.durationSec); }}>Add a vocal</button>
               <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('instrumental', clip.assetId, clip.durationSec); }}>Add instruments</button>

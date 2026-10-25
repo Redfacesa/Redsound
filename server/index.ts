@@ -10,6 +10,7 @@ import {
   openTask,
   prepareListing,
   studioSessions,
+  deleteSession,
   openSession,
   publicConfig,
   purchase,
@@ -417,6 +418,13 @@ app.post('/api/projects', (req, res, next) => {
     bpm: Number.isFinite(bpm) ? bpm : 120,
     musicalKey: String(req.body.musicalKey || 'C Minor'),
   }).then((session) => res.status(201).json(session)).catch(next);
+});
+
+app.delete('/api/projects/:id', (req, res, next) => {
+  deleteSession(req.params.id).then((gone) => {
+    if (!gone) return res.status(404).json({ error: 'Session not found.' });
+    res.json({ ok: true });
+  }).catch(next);
 });
 
 app.get('/api/rights', (_req, res) => {

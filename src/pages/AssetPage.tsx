@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { addVocalTake, setTrack, type Arrangement } from '@shared/arrange.ts';
 import { formatZar, originLabel } from '@shared/rights.ts';
 import type { TrackView } from '@shared/types.ts';
@@ -17,6 +17,7 @@ type Action = 'split' | 'arrange' | 'voice' | 'instruments' | 'section' | 'versi
 
 export function AssetPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const [asset, setAsset] = useState<TrackView | null>(null);
   const [library, setLibrary] = useState<TrackView[]>([]);
   const [error, setError] = useState('');
@@ -80,13 +81,29 @@ export function AssetPage() {
     }
   }
 
+  async function dropSession() {
+    if (!asset) return;
+    if (!window.confirm(`Delete “${asset.title}” and its recordings? This cannot be undone.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.deleteSession(asset.projectId || id);
+      navigate('/studio');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The session did not delete.');
+      setBusy(false);
+    }
+  }
+
   if (!asset) return <p className="meta">{error || 'Opening session…'}</p>;
   const openAsset = asset;
 
   async function shapeClip(action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) {
     setBusy(true);
     setError('');
-    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding instruments to this recording';
+    const tempo = arrangement?.bpm || openAsset.bpm || 120;
+    const key = openAsset.musicalKey || 'C Minor';
+    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making the song from this vocal' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding a beat under this vocal';
     setJob(label);
     try {
       const task = action === 'extend'
@@ -98,29 +115,39 @@ export function AssetPage() {
         })
         : action === 'version'
           ? await api.cover(assetId, {
-            style: 'A new arrangement of this recording, keep the performance',
+            style: `${style}, ${tempo} BPM, ${key}. Cover this exact vocal. Keep the same tempo, cadence and phrasing.`,
             title: openAsset.title,
             instrumental: false,
             lyrics,
+            bpm: tempo,
+            musicalKey: key,
+            single: true,
           })
           : action === 'separate'
             ? await api.stems(assetId, { type: 'separate_vocal' })
             : action === 'vocals'
               ? await api.vocals(assetId, { style: style || 'Keep this recording and add a vocal', title: openAsset.title, lyrics })
-              : await api.instrumental(assetId, { tags: style || 'Keep this recording and add instruments', title: openAsset.title, lyrics });
+              : await api.instrumental(assetId, {
+                tags: `${style}, ${tempo} BPM, ${key}, same tempo and cadence as this vocal`,
+                title: openAsset.title,
+                lyrics,
+                bpm: tempo,
+                musicalKey: key,
+                single: true,
+              });
       const done = await pollTask(task.id);
       if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
       const fresh = await api.asset(id);
       setAsset(fresh);
-      const incoming = [...fresh.children, ...(done.assets || []).filter((item): item is TrackView => Boolean(item))];
+      const incoming = [...fresh.children, ...(done.assets || []).filter((item): item is TrackView => Boolean(item))]
+        .filter((item) => item.audioUrl && item.id !== id && !arrangement?.tracks.some((track) => track.assetId === item.id || track.clips.some((clip) => clip.assetId === item.id)));
+      const chosen = action === 'version' || action === 'instrumental' ? incoming.slice(0, 1) : incoming;
       const urls: Record<string, string> = {};
       if (arrangement) {
         let next = arrangement;
-        for (const item of incoming) {
-          if (!item.audioUrl || item.id === id) continue;
+        for (const item of chosen) {
+          if (!item.audioUrl) continue;
           urls[item.id] = item.audioUrl;
-          const present = next.tracks.some((track) => track.assetId === item.id || track.clips.some((clip) => clip.assetId === item.id));
-          if (present) continue;
           next = addVocalTake(next, {
             assetId: item.id,
             title: item.title,
@@ -167,9 +194,13 @@ export function AssetPage() {
           </div>
         </div>
         <div className="row">
+          <select aria-label="Genre" value={style} onChange={(event) => setStyle(event.target.value)}>
+            {['Amapiano', 'Hip-Hop', 'R&B', 'Afrobeat', 'Gospel', 'Trap', 'Pop'].map((item) => <option key={item}>{item}</option>)}
+          </select>
           <button className="btn secondary" type="button" onClick={() => setRevealMaster((value) => value + 1)}>Master</button>
           <button className="btn" type="button" onClick={() => setBounceSignal((value) => value + 1)}>Export</button>
           <button className="btn secondary" type="button" disabled={busy} onClick={() => listInStore([asset.id])}>Store</button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => { void dropSession(); }}>Delete</button>
         </div>
       </div>
       {job && (

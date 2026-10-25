@@ -12,7 +12,7 @@ export interface Clip {
   gain?: number;
 }
 
-export type EffectType = 'eq' | 'compressor' | 'de-esser' | 'saturation' | 'reverb' | 'delay';
+export type EffectType = 'eq' | 'compressor' | 'de-esser' | 'saturation' | 'reverb' | 'delay' | 'autotune' | 'pitch';
 export type ChannelRole = 'lead' | 'backing' | 'adlib' | 'double' | 'beat' | 'bass' | 'drums' | 'music' | 'fx' | 'vocal-bus' | 'drum-bus' | 'master';
 
 export interface ChannelEffect {
@@ -167,7 +167,7 @@ export function blankArrangement(id: string, bpm: number, newId: () => string = 
   }, newId);
 }
 
-const EFFECT_TYPES: EffectType[] = ['eq', 'compressor', 'de-esser', 'saturation', 'reverb', 'delay'];
+const EFFECT_TYPES: EffectType[] = ['eq', 'compressor', 'de-esser', 'saturation', 'reverb', 'delay', 'autotune', 'pitch'];
 
 function effectChain(newId: () => string): ChannelEffect[] {
   return EFFECT_TYPES.map((type) => ({ id: newId(), type, enabled: false, amount: 0.45 }));
@@ -195,7 +195,11 @@ export function ensureMixer(arrangement: Arrangement, newId: () => string = () =
   const channels: MixerChannel[] = [...(arrangement.channels || [])];
   function need(role: ChannelRole, name: string, kind: MixerChannel['kind']): MixerChannel {
     const found = channels.find((channel) => channel.role === role && channel.kind === kind);
-    if (found) return found;
+    if (found) {
+      const missing = EFFECT_TYPES.filter((type) => found.kind === 'channel' && !found.effects.some((effect) => effect.type === type));
+      if (missing.length) found.effects = [...found.effects, ...missing.map((type) => ({ id: newId(), type, enabled: false, amount: 0.5 }))];
+      return found;
+    }
     const created: MixerChannel = {
       id: newId(),
       name,
@@ -231,7 +235,16 @@ export function ensureMixer(arrangement: Arrangement, newId: () => string = () =
     channels.push(channel);
     return { ...track, channelId: channel.id };
   });
-  return { ...arrangement, tracks, channels };
+  const filled = channels.map((channel) => {
+    if (channel.kind !== 'channel') return channel;
+    const missing = EFFECT_TYPES.filter((type) => !channel.effects.some((effect) => effect.type === type));
+    if (!missing.length) return channel;
+    return {
+      ...channel,
+      effects: [...channel.effects, ...missing.map((type) => ({ id: newId(), type, enabled: false, amount: 0.5 }))],
+    };
+  });
+  return { ...arrangement, tracks, channels: filled };
 }
 
 export function addVocalTake(
@@ -690,6 +703,39 @@ export function addSection(arrangement: Arrangement, name: string, startSec: num
   return {
     ...arrangement,
     sections: [...arrangement.sections, { id: newId(), name, startSec: start, endSec: end }].sort((a, b) => a.startSec - b.startSec),
+  };
+}
+
+export function removeSection(arrangement: Arrangement, sectionId: string): Arrangement {
+  return { ...arrangement, sections: arrangement.sections.filter((section) => section.id !== sectionId) };
+}
+
+export type VocalPreset = 'natural' | 'hard-tune' | 'booth' | 'studio' | 'hall' | 'stage' | 'slap';
+
+export function applyVocalPreset(arrangement: Arrangement, channelId: string, preset: VocalPreset): Arrangement {
+  const settings: Record<VocalPreset, Partial<Record<EffectType, number>>> = {
+    natural: { eq: 0.45, compressor: 0.35, 'de-esser': 0.3, autotune: 0.15 },
+    'hard-tune': { autotune: 1, eq: 0.7, compressor: 0.75, 'de-esser': 0.45, delay: 0.12 },
+    booth: { eq: 0.4, compressor: 0.4, 'de-esser': 0.35, reverb: 0.08 },
+    studio: { eq: 0.55, compressor: 0.5, 'de-esser': 0.4, reverb: 0.28, delay: 0.15 },
+    hall: { eq: 0.4, compressor: 0.35, reverb: 0.72 },
+    stage: { eq: 0.5, compressor: 0.45, reverb: 0.48, delay: 0.55 },
+    slap: { eq: 0.4, compressor: 0.3, delay: 0.2, reverb: 0.12 },
+  };
+  const chosen = settings[preset];
+  return {
+    ...arrangement,
+    channels: arrangement.channels?.map((channel) => {
+      if (channel.id !== channelId) return channel;
+      return {
+        ...channel,
+        effects: channel.effects.map((effect) => (
+          chosen[effect.type] == null
+            ? { ...effect, enabled: false }
+            : { ...effect, enabled: true, amount: chosen[effect.type] as number }
+        )),
+      };
+    }),
   };
 }
 

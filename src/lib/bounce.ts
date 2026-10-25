@@ -39,7 +39,7 @@ export async function bounceArrangement(arrangement: Arrangement, buffers: Map<s
   const seconds = Math.min(arrangementEnd(arrangement), 60 * 8);
   const rate = 44100;
   const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(seconds * rate)), rate);
-  const desk = buildDesk(ctx, arrangement.channels || []);
+  const desk = buildDesk(ctx, arrangement.channels || [], undefined, arrangement.bpm);
   scheduleArrangement(ctx, arrangement, buffers, desk, 0, 0);
   return wavBlob(await ctx.startRendering());
 }
