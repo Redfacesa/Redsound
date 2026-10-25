@@ -37,6 +37,7 @@ export function Shell() {
           <NavLink to="/market">Marketplace</NavLink>
           <NavLink to="/rights">Rights</NavLink>
           <NavLink to="/earnings">Earnings</NavLink>
+          <NavLink to="/plans">Plans</NavLink>
         </div>
       </aside>
       <div className="workspace">

@@ -12,10 +12,20 @@ export type LicenseTier = (typeof LICENSE_TIERS)[number];
 
 export type ComponentRole = 'instrumental' | 'vocal' | 'lyrics' | 'arrangement' | 'mix' | 'sample' | 'stem';
 
+export interface SubscriptionState {
+  planId: 'basic' | 'premium' | 'studio';
+  planCode: string;
+  status: 'active' | 'pending';
+  email: string;
+  paymentId?: string;
+  currentPeriodEnd?: string;
+}
+
 export interface Profile {
   id: string;
   displayName: string;
   handle: string;
+  subscription?: SubscriptionState;
 }
 
 export interface MusicalWork {

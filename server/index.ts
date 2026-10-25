@@ -49,6 +49,7 @@ import {
   vocalRemovalRecord,
 } from './suno/client.ts';
 import { refreshSideTask, registerProduce } from './actions.ts';
+import { BillingError, billingSnapshot, confirmCheckout, publicOrigin, requireAccess, startCheckout } from './billing.ts';
 
 loadEnv();
 
@@ -61,6 +62,27 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/config', (_req, res) => {
   res.json(publicConfig());
+});
+
+app.get('/api/billing', (_req, res) => {
+  res.json(billingSnapshot());
+});
+
+app.post('/api/billing/checkout', async (req, res, next) => {
+  try {
+    const result = await startCheckout(String(req.body.planId || ''), String(req.body.email || ''), publicOrigin(req));
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/billing/confirm', async (req, res, next) => {
+  try {
+    res.json(await confirmCheckout(String(req.body.paymentId || '')));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/profile', (_req, res) => {
@@ -136,6 +158,7 @@ app.post('/api/assets/upload', async (req, res, next) => {
 app.post('/api/generate', async (req, res, next) => {
   try {
     requireSuno();
+    requireAccess('generate');
     const input = {
       prompt: req.body.prompt as string | undefined,
       lyrics: req.body.lyrics as string | undefined,
@@ -172,6 +195,7 @@ app.post('/api/generate', async (req, res, next) => {
 app.post('/api/lyrics', async (req, res, next) => {
   try {
     requireSuno();
+    requireAccess('lyrics');
     const prompt = String(req.body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ error: 'Describe the lyrics.' });
     const created = await generateLyrics(prompt, callbackUrl());
@@ -200,6 +224,7 @@ app.post('/api/assets/:id/stems', async (req, res, next) => {
       return res.status(400).json({ error: 'Stem separation needs a Suno track or a public audio URL. Local recordings have to be hosted first.' });
     }
     requireSuno();
+    requireAccess('vocal_removal');
     if (type === 'split_stem_advanced') payload.stemName = String(req.body.stemName || 'Lead Vocal');
     const task = await openTask('vocal_removal', { ...payload, parentAssetId: asset.id });
     const created = await vocalRemoval(payload);
@@ -219,6 +244,7 @@ app.post('/api/assets/:id/extend', async (req, res, next) => {
   try {
     const source = sourceAudio(req.params.id);
     requireSuno();
+    requireAccess('extend');
     const body = {
       audioId: source.audioId,
       taskId: source.taskId,
@@ -246,7 +272,6 @@ app.post('/api/suno/:action', async (req, res, next) => {
       void ingestCallback(req.body).catch((error) => console.error('Suno callback failed', error));
       return;
     }
-    requireSuno();
     const body = { ...req.body, model: req.body.model || defaultModel(), callBackUrl: req.body.callBackUrl || callbackUrl() };
     const runners: Record<string, (payload: Record<string, unknown>) => Promise<{ data?: { taskId?: string } }>> = {
       'upload-cover': uploadCover,
@@ -259,8 +284,10 @@ app.post('/api/suno/:action', async (req, res, next) => {
     };
     const run = runners[action];
     if (!run) return res.status(404).json({ error: 'Unknown Suno action.' });
-    const created = await run(body);
     const kind = action === 'wav' ? 'wav' : action === 'mashup' ? 'mashup' : action === 'add-vocals' ? 'add_vocals' : action === 'add-instrumental' ? 'add_instrumental' : action === 'replace-section' ? 'replace_section' : action === 'upload-cover' ? 'upload_cover' : 'upload_extend';
+    requireSuno();
+    requireAccess(kind);
+    const created = await run(body);
     const task = await openTask(kind, body, created.data?.taskId);
     res.status(202).json(task);
   } catch (error) {
@@ -409,7 +436,7 @@ app.get('/api/credits', async (_req, res, next) => {
 registerProduce(app);
 
 const dist = path.resolve(process.cwd(), 'dist');
-  if (process.env.NODE_ENV === 'production' && fs.existsSync(dist)) {
+if (!process.env.VERCEL && process.env.NODE_ENV === 'production' && fs.existsSync(dist)) {
   app.use(express.static(dist));
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
@@ -418,16 +445,20 @@ const dist = path.resolve(process.cwd(), 'dist');
 }
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const status = error instanceof SunoError ? error.code : 400;
+  const status = error instanceof SunoError || error instanceof BillingError ? error.code : 400;
   const message = error instanceof Error ? error.message : 'Request failed';
   const http = status >= 400 && status < 600 ? status : 400;
   res.status(http === 201 ? 400 : http).json({ error: message });
 });
 
-const port = Number(process.env.PORT || 8787);
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Red Sound API on 0.0.0.0:${port}`);
-});
+export default app;
+
+if (!process.env.VERCEL) {
+  const port = Number(process.env.PORT || 8787);
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Red Sound API on 0.0.0.0:${port}`);
+  });
+}
 
 function requireSuno() {
   if (!sunoConfigured()) throw new SunoError(503, 'Add SUNO_API_KEY on the server to generate, extend, or separate stems.');

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n web,api -c red,gray \"vite --port 5173\" \"tsx watch server/index.ts\"",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && node scripts/bundle-api.mjs",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "tsx --test server/domain/rights.test.ts server/domain/arrange.test.ts server/suno/generate.test.ts"
   },
@@ -21,6 +21,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
+    "esbuild": "^0.25.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"

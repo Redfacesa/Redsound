@@ -14,6 +14,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
+  billing: () => request<{
+    payConfigured: boolean;
+    payOrigin: string;
+    pendingPaymentId?: string;
+    plans: Array<{
+      id: 'basic' | 'premium' | 'studio';
+      name: string;
+      amountZar: number;
+      planCode: string;
+      interval: 'monthly';
+      generations: number;
+      summary: string;
+      includes: string[];
+    }>;
+    subscription: null | {
+      planId: 'basic' | 'premium' | 'studio';
+      planName: string;
+      status: string;
+      email: string;
+      currentPeriodEnd?: string;
+      generationsUsed: number;
+      generations: number;
+    };
+  }>('/api/billing'),
+  checkoutPlan: (planId: string, email: string) =>
+    request<{ checkoutUrl: string; paymentId: string; planId: string }>('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ planId, email }) }),
+  confirmPlan: (paymentId: string) =>
+    request<{ active: boolean; status: string; planId?: string; currentPeriodEnd?: string }>('/api/billing/confirm', { method: 'POST', body: JSON.stringify({ paymentId }) }),
   profile: () => request<Profile>('/api/profile'),
   saveProfile: (profile: Pick<Profile, 'displayName' | 'handle'>) =>
     request<Profile>('/api/profile', { method: 'PUT', body: JSON.stringify(profile) }),

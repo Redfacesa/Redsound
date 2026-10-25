@@ -5,6 +5,7 @@ import { CreatePage } from './pages/CreatePage';
 import { EarningsPage } from './pages/EarningsPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { MarketPage } from './pages/MarketPage';
+import { PlansPage } from './pages/PlansPage';
 import { RightsPage } from './pages/RightsPage';
 import { StudioPage } from './pages/StudioPage';
 
@@ -22,6 +23,7 @@ export function App() {
           <Route path="/library/:id" element={<AssetPage />} />
           <Route path="/rights" element={<RightsPage />} />
           <Route path="/earnings" element={<EarningsPage />} />
+          <Route path="/plans" element={<PlansPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

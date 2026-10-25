@@ -35,7 +35,10 @@ export interface Database {
   grantSeq: number;
 }
 
-const dataDir = path.resolve(process.cwd(), 'data');
+// Vercel functions can write to /tmp only, and that disk is not shared across instances.
+const dataDir = process.env.VERCEL
+  ? path.join('/tmp', 'redsound')
+  : path.resolve(process.cwd(), 'data');
 const dbPath = path.join(dataDir, 'db.json');
 
 function emptyDb(): Database {

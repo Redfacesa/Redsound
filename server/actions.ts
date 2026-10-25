@@ -10,6 +10,7 @@ import {
   rememberPersona,
 } from './catalog.ts';
 import { view } from './store.ts';
+import { requireAccess } from './billing.ts';
 import {
   SunoError,
   addInstrumental,
@@ -38,8 +39,9 @@ import {
   wavRecord,
 } from './suno/client.ts';
 
-function requireSuno() {
+function requireSuno(kind: Parameters<typeof requireAccess>[0]) {
   if (!sunoConfigured()) throw new SunoError(503, 'Add SUNO_API_KEY on the server to use Suno.');
+  requireAccess(kind);
 }
 
 function assetOrThrow(id: string): Asset {
@@ -159,7 +161,7 @@ export async function refreshSideTask(existing: TaskRecord): Promise<'handled' |
 export function registerProduce(app: express.Express) {
   app.post('/api/assets/:id/cover', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('upload_cover');
       const asset = assetOrThrow(req.params.id);
       const url = publicAudio(asset);
       const created = await uploadCover({
@@ -180,7 +182,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/upload-extend', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('upload_extend');
       const asset = assetOrThrow(req.params.id);
       const created = await uploadExtend({
         uploadUrl: publicAudio(asset),
@@ -200,7 +202,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/vocals', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('add_vocals');
       const asset = assetOrThrow(req.params.id);
       const style = text(req.body.style, 1000);
       const negativeTags = text(req.body.negativeTags, 200, 'silence');
@@ -224,7 +226,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/instrumental', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('add_instrumental');
       const asset = assetOrThrow(req.params.id);
       const tags = text(req.body.tags, 1000);
       const title = text(req.body.title, 80, asset.title);
@@ -246,7 +248,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/replace', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('replace_section');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       const start = Number(req.body.infillStartS);
@@ -279,7 +281,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/mashup', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('mashup');
       const ids = Array.isArray(req.body.assetIds) ? req.body.assetIds.map(String).slice(0, 2) : [];
       if (ids.length !== 2) throw new SunoError(400, 'A mashup needs exactly two tracks.');
       const urls = ids.map((id) => publicAudio(assetOrThrow(id)));
@@ -296,7 +298,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/wav', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('wav');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       if (!ids.taskId || !ids.audioId) throw new SunoError(400, 'WAV conversion needs a finished Suno track.');
@@ -310,7 +312,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/midi', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('midi');
       const asset = assetOrThrow(req.params.id);
       const separation = [...view().tasks]
         .reverse()
@@ -327,7 +329,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/persona', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('persona');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       if (!ids.taskId || !ids.audioId) throw new SunoError(400, 'A persona needs a finished Suno track.');
@@ -355,7 +357,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/lyrics-sync', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('lyrics_sync');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       if (!ids.taskId || !ids.audioId) throw new SunoError(400, 'Aligned lyrics need a finished Suno track.');
@@ -369,7 +371,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/artwork', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('cover_image');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       if (!ids.taskId) throw new SunoError(400, 'Cover art needs the original Suno generation task.');
@@ -382,7 +384,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/assets/:id/recover', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('recovery');
       const asset = assetOrThrow(req.params.id);
       const ids = sunoIds(asset.id);
       if (!ids.taskId) throw new SunoError(400, 'Recovery needs the original Suno task id.');
@@ -395,7 +397,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/sounds', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('sounds');
       const prompt = text(req.body.prompt, 500);
       if (!prompt) throw new SunoError(400, 'Describe the sound.');
       const created = await generateSounds({
@@ -415,7 +417,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/style', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('style');
       const content = text(req.body.content, 2000);
       if (!content) throw new SunoError(400, 'Describe the style you want boosted.');
       const record = await boostStyle(content);
@@ -428,7 +430,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/voice/validate', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('voice');
       const voiceUrl = text(req.body.voiceUrl, 500);
       if (!voiceUrl.startsWith('http')) throw new SunoError(400, 'Voice validation needs a public audio URL.');
       const created = await voiceValidate({
@@ -446,7 +448,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/voice/generate', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('voice');
       const sourceTaskId = text(req.body.taskId, 80);
       const verifyUrl = text(req.body.verifyUrl, 500);
       const voiceName = text(req.body.voiceName, 80);
@@ -468,7 +470,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/voice/regenerate', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('voice');
       const sourceTaskId = text(req.body.taskId, 80);
       if (!sourceTaskId) throw new SunoError(400, 'Regenerate needs the voice task id.');
       const created = await voiceRegenerate(sourceTaskId, callbackUrl());
@@ -480,7 +482,7 @@ export function registerProduce(app: express.Express) {
 
   app.post('/api/voice/check', async (req, res, next) => {
     try {
-      requireSuno();
+      requireSuno('voice');
       const taskId = text(req.body.taskId, 80);
       if (!taskId) throw new SunoError(400, 'Check voice needs a task id.');
       const record = await voiceCheck(taskId);
