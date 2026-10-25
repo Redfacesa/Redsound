@@ -7,6 +7,8 @@ import {
   duplicateSection,
   moveClip,
   pasteClipboard,
+  removeClip,
+  removeTrack,
   seedArrangement,
   snapTime,
   splitAt,
@@ -31,6 +33,42 @@ test('split at the playhead makes two clips that cover the original', () => {
   assert.equal(clips[1].startSec, 3);
   assert.equal(clips[1].offsetSec, clip.offsetSec + 3);
   assert.equal(clips[0].durationSec + clips[1].durationSec, 8);
+});
+
+test('splitting one track leaves the other track in one piece', () => {
+  seq = 0;
+  const arrangement = seedArrangement('session', 120, [
+    { id: 'vocal', title: 'Voice', durationSec: 8 },
+    { id: 'beat', title: 'Beat', durationSec: 8 },
+  ], id);
+  const vocal = arrangement.tracks[0];
+  const once = splitAt(arrangement, 2, id, vocal.id);
+  const twice = splitAt(once, 5, id, vocal.id);
+  const pieces = twice.tracks[0].clips;
+  assert.equal(pieces.length, 3);
+  assert.equal(twice.tracks[1].clips.length, 1);
+  const middle = pieces[1];
+  const removed = removeClip(twice, middle.id);
+  assert.equal(removed.tracks[0].clips.length, 2);
+  assert.equal(removed.tracks[0].clips[0].durationSec, 2);
+  assert.equal(removed.tracks[0].clips[1].startSec, 5);
+  assert.equal(removed.tracks[1].clips.length, 1);
+});
+
+test('deleting one track leaves the other tracks alone', () => {
+  seq = 0;
+  const arrangement = seedArrangement('session', 120, [
+    { id: 'vocal', title: 'Voice', durationSec: 8 },
+    { id: 'beat', title: 'Beat', durationSec: 8 },
+  ], id);
+  const vocal = arrangement.tracks[0];
+  const cut = deleteRange(arrangement, vocal.clips[0].startSec, vocal.clips[0].startSec + vocal.clips[0].durationSec, id, vocal.id);
+  assert.equal(cut.tracks[0].clips.length, 0);
+  assert.equal(cut.tracks[1].clips.length, 1);
+  assert.equal(cut.tracks[1].clips[0].durationSec, 8);
+  const removed = removeTrack(arrangement, vocal.id);
+  assert.equal(removed.tracks.length, 1);
+  assert.equal(removed.tracks[0].assetId, 'beat');
 });
 
 test('deleting the middle of a clip leaves the audio on both sides', () => {

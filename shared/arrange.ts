@@ -401,77 +401,118 @@ function replaceClip(arrangement: Arrangement, clipId: string, next: Clip | Clip
   };
 }
 
-export function splitAt(arrangement: Arrangement, time: number, newId: () => string = () => crypto.randomUUID()): Arrangement {
+export function splitAt(
+  arrangement: Arrangement,
+  time: number,
+  newId: () => string = () => crypto.randomUUID(),
+  trackId?: string,
+): Arrangement {
   return {
     ...arrangement,
-    tracks: arrangement.tracks.map((track) => ({
-      ...track,
-      clips: track.clips.flatMap((clip) => {
-        if (time <= clip.startSec + 0.02 || time >= clipEnd(clip) - 0.02) return [clip];
-        const leftDuration = time - clip.startSec;
-        const left: Clip = { ...clip, durationSec: leftDuration, fadeOutSec: 0 };
-        const right: Clip = {
-          ...clip,
-          id: newId(),
-          startSec: time,
-          offsetSec: clip.offsetSec + leftDuration,
-          durationSec: clip.durationSec - leftDuration,
-          fadeInSec: 0,
-        };
-        return [left, right];
-      }),
-    })),
+    tracks: arrangement.tracks.map((track) => {
+      if (trackId && track.id !== trackId) return track;
+      return {
+        ...track,
+        clips: track.clips.flatMap((clip) => {
+          if (time <= clip.startSec + 0.02 || time >= clipEnd(clip) - 0.02) return [clip];
+          const leftDuration = time - clip.startSec;
+          const left: Clip = { ...clip, durationSec: leftDuration, fadeOutSec: 0 };
+          const right: Clip = {
+            ...clip,
+            id: newId(),
+            startSec: time,
+            offsetSec: clip.offsetSec + leftDuration,
+            durationSec: clip.durationSec - leftDuration,
+            fadeInSec: 0,
+          };
+          return [left, right];
+        }),
+      };
+    }),
   };
 }
 
-export function deleteRange(arrangement: Arrangement, rangeStart: number, rangeEnd: number, newId: () => string = () => crypto.randomUUID()): Arrangement {
+export function deleteRange(
+  arrangement: Arrangement,
+  rangeStart: number,
+  rangeEnd: number,
+  newId: () => string = () => crypto.randomUUID(),
+  trackId?: string,
+): Arrangement {
   const start = Math.min(rangeStart, rangeEnd);
   const end = Math.max(rangeStart, rangeEnd);
   return {
     ...arrangement,
+    tracks: arrangement.tracks.map((track) => {
+      if (trackId && track.id !== trackId) return track;
+      return {
+        ...track,
+        clips: track.clips.flatMap((clip) => {
+          const clipStart = clip.startSec;
+          const endSec = clipEnd(clip);
+          if (!overlaps(clipStart, endSec, start, end)) return [clip];
+          if (clipStart >= start && endSec <= end) return [];
+          if (clipStart < start && endSec > end) {
+            const leftDuration = start - clipStart;
+            const rightStart = end;
+            return [
+              { ...clip, durationSec: leftDuration, fadeOutSec: 0 },
+              {
+                ...clip,
+                id: newId(),
+                startSec: rightStart,
+                offsetSec: clip.offsetSec + (rightStart - clipStart),
+                durationSec: endSec - rightStart,
+                fadeInSec: 0,
+              },
+            ];
+          }
+          if (clipStart < start) {
+            return [{ ...clip, durationSec: start - clipStart, fadeOutSec: 0 }];
+          }
+          const trim = end - clipStart;
+          return [{
+            ...clip,
+            startSec: end,
+            offsetSec: clip.offsetSec + trim,
+            durationSec: clip.durationSec - trim,
+            fadeInSec: 0,
+          }];
+        }),
+      };
+    }),
+  };
+}
+
+export function removeClip(arrangement: Arrangement, clipId: string): Arrangement {
+  return {
+    ...arrangement,
     tracks: arrangement.tracks.map((track) => ({
       ...track,
-      clips: track.clips.flatMap((clip) => {
-        const clipStart = clip.startSec;
-        const endSec = clipEnd(clip);
-        if (!overlaps(clipStart, endSec, start, end)) return [clip];
-        if (clipStart >= start && endSec <= end) return [];
-        if (clipStart < start && endSec > end) {
-          const leftDuration = start - clipStart;
-          const rightStart = end;
-          return [
-            { ...clip, durationSec: leftDuration, fadeOutSec: 0 },
-            {
-              ...clip,
-              id: newId(),
-              startSec: rightStart,
-              offsetSec: clip.offsetSec + (rightStart - clipStart),
-              durationSec: endSec - rightStart,
-              fadeInSec: 0,
-            },
-          ];
-        }
-        if (clipStart < start) {
-          return [{ ...clip, durationSec: start - clipStart, fadeOutSec: 0 }];
-        }
-        const trim = end - clipStart;
-        return [{
-          ...clip,
-          startSec: end,
-          offsetSec: clip.offsetSec + trim,
-          durationSec: clip.durationSec - trim,
-          fadeInSec: 0,
-        }];
-      }),
+      clips: track.clips.filter((clip) => clip.id !== clipId),
     })),
   };
 }
 
-export function copyRange(arrangement: Arrangement, rangeStart: number, rangeEnd: number): ClipClipboard {
+export function removeTrack(arrangement: Arrangement, trackId: string): Arrangement {
+  const track = arrangement.tracks.find((item) => item.id === trackId);
+  const channelId = track?.channelId;
+  const stillUsed = arrangement.tracks.some((item) => item.id !== trackId && item.channelId === channelId);
+  return {
+    ...arrangement,
+    tracks: arrangement.tracks.filter((item) => item.id !== trackId),
+    channels: channelId && !stillUsed
+      ? arrangement.channels?.filter((channel) => channel.id !== channelId || channel.kind !== 'channel')
+      : arrangement.channels,
+  };
+}
+
+export function copyRange(arrangement: Arrangement, rangeStart: number, rangeEnd: number, trackId?: string): ClipClipboard {
   const start = Math.min(rangeStart, rangeEnd);
   const end = Math.max(rangeStart, rangeEnd);
   const items: ClipClipboard['items'] = [];
   for (const track of arrangement.tracks) {
+    if (trackId && track.id !== trackId) continue;
     for (const clip of track.clips) {
       const clipStart = clip.startSec;
       const endSec = clipEnd(clip);
@@ -599,8 +640,9 @@ export function duplicateRange(
   rangeStart: number,
   rangeEnd: number,
   newId: () => string = () => crypto.randomUUID(),
+  trackId?: string,
 ): Arrangement {
-  const clipboard = copyRange(arrangement, rangeStart, rangeEnd);
+  const clipboard = copyRange(arrangement, rangeStart, rangeEnd, trackId);
   const at = Math.max(rangeStart, rangeEnd);
   return pasteClipboard(arrangement, clipboard, at, newId);
 }

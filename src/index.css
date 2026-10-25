@@ -387,6 +387,29 @@ audio.bare { width: 100%; }
 .tl-tool.on { border-color: var(--red); background: #2a1210; }
 .tl-play { gap: 6px; min-width: 84px; }
 .tl-note { color: #ffb0a8; font-size: 12px; white-space: nowrap; }
+.tl-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 196px;
+  padding: 4px;
+  background: #12141a;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+}
+.tl-menu button {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+}
+.tl-menu button:hover { background: #2a1714; }
+.tl-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .tl-tools {
   display: flex;
   flex-wrap: nowrap;
@@ -472,6 +495,7 @@ audio.bare { width: 100%; }
   overflow: hidden;
   cursor: grab;
 }
+.clip.on { outline: 2px solid #fff; outline-offset: -2px; z-index: 2; }
 .clip canvas { width: 100%; height: 100%; display: block; }
 .clip em { position: absolute; left: 8px; top: 4px; right: 8px; font-style: normal; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .transport-play, .transport-rec { white-space: nowrap; flex: 0 0 auto; }
@@ -481,7 +505,29 @@ audio.bare { width: 100%; }
 .fade-handle { position: absolute; top: 0; width: 10px; height: 10px; border: 0; background: var(--text); padding: 0; }
 .fade-handle.in { left: 0; }
 .fade-handle.out { right: 0; }
-.tl-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--red); pointer-events: none; z-index: 4; }
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #ff4d3a;
+  pointer-events: none;
+  z-index: 6;
+}
+.tl-marker {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: 16px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: #ff4d3a;
+  clip-path: polygon(0 0, 100% 0, 100% 58%, 50% 100%, 0 58%);
+  cursor: ew-resize;
+}
 .transport-rec { border: 0; background: #3a1414; color: #ffd0c8; border-radius: 99px; padding: 8px 14px; font-weight: 600; }
 .transport-rec.on { background: var(--red); color: white; }
 .tl-mic { height: 32px; max-width: 160px; padding: 0 8px; flex: 0 0 auto; }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { Arrangement } from '@shared/arrange.ts';
+import { addVocalTake, setTrack, type Arrangement } from '@shared/arrange.ts';
 import { formatZar, originLabel } from '@shared/rights.ts';
 import type { TrackView } from '@shared/types.ts';
 import { Timeline } from '../components/Timeline';
@@ -81,6 +81,69 @@ export function AssetPage() {
   }
 
   if (!asset) return <p className="meta">{error || 'Opening session…'}</p>;
+  const openAsset = asset;
+
+  async function shapeClip(action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) {
+    setBusy(true);
+    setError('');
+    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding instruments to this recording';
+    setJob(label);
+    try {
+      const task = action === 'extend'
+        ? await api.uploadExtend(assetId, {
+          continueAt: Math.max(1, Math.round(durationSec - 0.5)),
+          style: 'Continue this recording, same voice and tempo',
+          title: openAsset.title,
+          lyrics,
+        })
+        : action === 'version'
+          ? await api.cover(assetId, {
+            style: 'A new arrangement of this recording, keep the performance',
+            title: openAsset.title,
+            instrumental: false,
+            lyrics,
+          })
+          : action === 'separate'
+            ? await api.stems(assetId, { type: 'separate_vocal' })
+            : action === 'vocals'
+              ? await api.vocals(assetId, { style: style || 'Keep this recording and add a vocal', title: openAsset.title, lyrics })
+              : await api.instrumental(assetId, { tags: style || 'Keep this recording and add instruments', title: openAsset.title, lyrics });
+      const done = await pollTask(task.id);
+      if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
+      const fresh = await api.asset(id);
+      setAsset(fresh);
+      const incoming = [...fresh.children, ...(done.assets || []).filter((item): item is TrackView => Boolean(item))];
+      const urls: Record<string, string> = {};
+      if (arrangement) {
+        let next = arrangement;
+        for (const item of incoming) {
+          if (!item.audioUrl || item.id === id) continue;
+          urls[item.id] = item.audioUrl;
+          const present = next.tracks.some((track) => track.assetId === item.id || track.clips.some((clip) => clip.assetId === item.id));
+          if (present) continue;
+          next = addVocalTake(next, {
+            assetId: item.id,
+            title: item.title,
+            durationSec: item.durationSec || durationSec || 30,
+            startSec: 0,
+          });
+          const added = next.tracks[next.tracks.length - 1];
+          if (added) next = setTrack(next, added.id, { name: item.title });
+        }
+        if (next !== arrangement) {
+          setArrangement(next);
+          void api.saveArrangement(id, next);
+        }
+      }
+      if (Object.keys(urls).length) setExtraSources((current) => ({ ...current, ...urls }));
+      setJob('Ready');
+    } catch (reason) {
+      setError(studioError(reason instanceof Error ? reason.message : 'That pass did not finish.'));
+      setJob('');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const when = new Date(asset.createdAt).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
   const sources = {
@@ -139,9 +202,10 @@ export function AssetPage() {
               infillEndS: Number(range.end.toFixed(2)),
               fullLyrics: lyrics,
               tags: style,
-              title: asset.title,
+              title: openAsset.title,
             }));
           }}
+          onShape={(action, assetId, durationSec) => { void shapeClip(action, assetId, durationSec); }}
           onCapture={async (input) => {
             const file = new File([input.blob], `${input.title}.webm`, { type: input.blob.type || 'audio/webm' });
             const saved = await api.upload({

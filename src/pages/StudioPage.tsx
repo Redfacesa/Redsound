@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addVocalTake, type Arrangement } from '@shared/arrange.ts';
+import { addVocalTake, setTrack, type Arrangement } from '@shared/arrange.ts';
 import type { TaskRecord, TrackView } from '@shared/types.ts';
 import { Timeline } from '../components/Timeline';
 import { api, fileToBase64, pollTask } from '../lib/api';
@@ -54,10 +54,10 @@ export function StudioPage() {
   }, [lead?.id]);
   const openTasks = tasks.filter((task) => task.status !== 'SUCCESS' && !/FAIL|ERROR|SENSITIVE/.test(task.status));
 
-  async function shapeTake(action: 'extend' | 'version' | 'separate', assetId: string, durationSec: number) {
+  async function shapeTake(action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) {
     if (!lead || !session) return;
     setError('');
-    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : 'Separating this recording';
+    const label = action === 'extend' ? 'Extending this recording' : action === 'version' ? 'Making a new version of this recording' : action === 'separate' ? 'Separating this recording' : action === 'vocals' ? 'Adding a vocal to this recording' : 'Adding instruments to this recording';
     setJob(label);
     try {
       const task = action === 'extend'
@@ -74,7 +74,11 @@ export function StudioPage() {
             instrumental: false,
             lyrics: '',
           })
-          : await api.stems(assetId, { type: 'separate_vocal' });
+          : action === 'separate'
+            ? await api.stems(assetId, { type: 'separate_vocal' })
+            : action === 'vocals'
+              ? await api.vocals(assetId, { style: 'Keep this recording and add a vocal', title: lead.title, lyrics: '' })
+              : await api.instrumental(assetId, { tags: 'Keep this recording and add instruments', title: lead.title, lyrics: '' });
       const done = await pollTask(task.id);
       if (done.status !== 'SUCCESS') throw new Error(done.error || 'That pass did not finish.');
       const nextSessions = await api.projects();
@@ -93,6 +97,8 @@ export function StudioPage() {
             durationSec: asset.durationSec || 30,
             startSec: 0,
           });
+          const addedTrack = next.tracks[next.tracks.length - 1];
+          if (addedTrack) next = setTrack(next, addedTrack.id, { name: asset.title });
           added[asset.id] = asset.audioUrl;
         }
         if (next !== arrangement) {

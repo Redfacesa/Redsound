@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   addSection,
   addVocalTake,
@@ -14,6 +14,8 @@ import {
   moveClip,
   moveSection,
   pasteClipboard,
+  removeClip,
+  removeTrack,
   setChannel,
   setClip,
   setEffect,
@@ -50,6 +52,7 @@ type Drag =
   | { kind: 'move'; clipId: string; origin: number; x: number }
   | { kind: 'trim-start' | 'trim-end' | 'fade-in' | 'fade-out'; clipId: string; origin: number; x: number }
   | { kind: 'select'; origin: number }
+  | { kind: 'playhead'; origin: number; x: number }
   | { kind: 'section'; sectionId: string; origin: number; x: number };
 
 function Mark({ name }: { name: 'play' | 'pause' | 'stop' | 'record' | 'undo' | 'redo' | 'plus' | 'minus' }) {
@@ -83,7 +86,7 @@ export function Timeline({
   onCommit: (next: Arrangement) => void;
   onProduce?: (action: 'replace' | 'extend', range: Range) => void;
   onCapture?: (input: { blob: Blob; durationSec: number; startSec: number; title: string }) => Promise<{ id: string; title: string }>;
-  onShape?: (action: 'extend' | 'version' | 'separate', assetId: string, durationSec: number) => void;
+  onShape?: (action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) => void;
   sessionName?: string;
   revealMaster?: number;
   bounceSignal?: number;
@@ -95,6 +98,8 @@ export function Timeline({
   const [playNote, setPlayNote] = useState('');
   const [selection, setSelection] = useState<Range | null>(null);
   const [selectionTrack, setSelectionTrack] = useState('');
+  const [selectedClip, setSelectedClip] = useState('');
+  const [menu, setMenu] = useState<{ x: number; y: number; trackId: string; clipId: string } | null>(null);
   const [loop, setLoop] = useState(false);
   const [clipboard, setClipboard] = useState<ClipClipboard | null>(null);
   const [recState, setRecState] = useState<'idle' | 'count' | 'rec'>('idle');
@@ -118,6 +123,8 @@ export function Timeline({
   const savedRef = useRef(arrangement);
   const draftRef = useRef(draft);
   const selectionRef = useRef(selection);
+  const clipPick = useRef('');
+  const menuRef = useRef<HTMLDivElement>(null);
   const clipboardRef = useRef(clipboard);
   const loopRef = useRef(loop);
   const playRef = useRef(playhead);
@@ -145,6 +152,7 @@ export function Timeline({
   const [waveVersion, setWaveVersion] = useState(0);
   draftRef.current = draft;
   selectionRef.current = selection;
+  clipPick.current = selectedClip;
   clipboardRef.current = clipboard;
   loopRef.current = loop;
   playRef.current = playhead;
@@ -247,6 +255,24 @@ export function Timeline({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  useEffect(() => {
+    if (!menu) return;
+    function outside(event: PointerEvent) {
+      const node = menuRef.current;
+      if (node && event.target instanceof Node && node.contains(event.target)) return;
+      setMenu(null);
+    }
+    function onEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMenu(null);
+    }
+    window.addEventListener('pointerdown', outside);
+    window.addEventListener('keydown', onEscape);
+    return () => {
+      window.removeEventListener('pointerdown', outside);
+      window.removeEventListener('keydown', onEscape);
+    };
+  }, [menu]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -597,6 +623,12 @@ export function Timeline({
         setSelection({ start: drag.origin, end: time });
         return;
       }
+      if (drag.kind === 'playhead') {
+        const next = Math.max(0, snapped(time, 'off'));
+        playRef.current = next;
+        setPlayhead(next);
+        return;
+      }
       if (drag.kind === 'section') {
         const delta = (event.clientX - drag.x) / pxPerSec;
         apply(moveSection(current, drag.sectionId, snapped(drag.origin + delta)));
@@ -616,7 +648,7 @@ export function Timeline({
     function up() {
       const drag = dragRef.current;
       dragRef.current = null;
-      if (!drag || drag.kind === 'select') return;
+      if (!drag || drag.kind === 'select' || drag.kind === 'playhead') return;
       if (draftRef.current !== savedRef.current) commit(draftRef.current);
     }
     window.addEventListener('pointermove', move);
@@ -636,25 +668,50 @@ export function Timeline({
 
   const activeSelection = normalized(selection);
 
-  function copy() {
+  function takenClipboard() {
+    const picked = clipPick.current;
+    if (picked) {
+      for (const track of draftRef.current.tracks) {
+        const clip = track.clips.find((item) => item.id === picked);
+        if (!clip) continue;
+        return { span: clip.durationSec, items: [{ ...clip, trackId: track.id, startSec: 0 }] };
+      }
+    }
     const range = normalized(selectionRef.current);
-    if (!range) return;
-    const next = copyRange(draftRef.current, range.start, range.end);
-    if (next.items.length) setClipboard(next);
+    if (!range) return null;
+    const next = copyRange(draftRef.current, range.start, range.end, selectionTrack || undefined);
+    return next.items.length ? next : null;
+  }
+
+  function copy() {
+    const next = takenClipboard();
+    if (next) setClipboard(next);
   }
 
   function remove() {
+    const picked = clipPick.current;
+    if (picked) {
+      commit(removeClip(draftRef.current, picked));
+      setSelectedClip('');
+      setSelection(null);
+      return;
+    }
     const range = normalized(selectionRef.current);
-    if (!range) return;
-    commit(deleteRange(draftRef.current, range.start, range.end));
+    if (range) {
+      commit(deleteRange(draftRef.current, range.start, range.end, () => crypto.randomUUID(), selectionTrack || undefined));
+      setSelection(null);
+      return;
+    }
+    if (selectionTrack) {
+      commit(removeTrack(draftRef.current, selectionTrack));
+      setSelectionTrack('');
+    }
   }
 
   function cut() {
-    const range = normalized(selectionRef.current);
-    if (!range) return;
-    const next = copyRange(draftRef.current, range.start, range.end);
-    if (next.items.length) setClipboard(next);
-    commit(deleteRange(draftRef.current, range.start, range.end));
+    const next = takenClipboard();
+    if (next) setClipboard(next);
+    remove();
   }
 
   function paste() {
@@ -664,20 +721,49 @@ export function Timeline({
   }
 
   function split() {
-    const count = (value: Arrangement) => value.tracks.reduce((total, track) => total + track.clips.length, 0);
-    let next = splitAt(draftRef.current, playRef.current);
-    if (count(next) === count(draftRef.current)) {
-      const range = normalized(selectionRef.current);
-      if (range) next = splitAt(next, (range.start + range.end) / 2);
-    }
-    commit(next);
+    const pickedTrack = draftRef.current.tracks.find((track) => track.clips.some((clip) => clip.id === clipPick.current));
+    const trackId = selectionTrack || pickedTrack?.id || '';
+    if (!trackId) return;
+    commit(splitAt(draftRef.current, playRef.current, () => crypto.randomUUID(), trackId));
+    setSelectedClip('');
+    setSelection(null);
   }
 
   function duplicate() {
+    const picked = clipPick.current;
+    if (picked) {
+      for (const track of draftRef.current.tracks) {
+        const clip = track.clips.find((item) => item.id === picked);
+        if (!clip) continue;
+        commit(duplicateRange(draftRef.current, clip.startSec, clip.startSec + clip.durationSec, () => crypto.randomUUID(), track.id));
+        return;
+      }
+    }
     const range = normalized(selectionRef.current);
     if (!range) return;
-    const section = draftRef.current.sections.find((item) => Math.abs(item.startSec - range.start) < 0.05 && Math.abs(item.endSec - range.end) < 0.05);
-    commit(section ? duplicateSection(draftRef.current, section.id) : duplicateRange(draftRef.current, range.start, range.end));
+    const section = !selectionTrack && draftRef.current.sections.find((item) => Math.abs(item.startSec - range.start) < 0.05 && Math.abs(item.endSec - range.end) < 0.05);
+    commit(section ? duplicateSection(draftRef.current, section.id) : duplicateRange(draftRef.current, range.start, range.end, () => crypto.randomUUID(), selectionTrack || undefined));
+  }
+
+  function openMenu(event: { preventDefault: () => void; stopPropagation: () => void; clientX: number; clientY: number }, trackId: string, clipId = '') {
+    event.preventDefault();
+    event.stopPropagation();
+    const track = draftRef.current.tracks.find((item) => item.id === trackId);
+    const clip = clipId ? track?.clips.find((item) => item.id === clipId) : undefined;
+    setSelectionTrack(trackId);
+    if (clip) {
+      setSelectedClip(clip.id);
+      setSelection({ start: clip.startSec, end: clip.startSec + clip.durationSec });
+    } else {
+      setSelectedClip('');
+      setSelection(null);
+    }
+    setMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 220)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 320)),
+      trackId,
+      clipId: clip?.id || '',
+    });
   }
 
   function tighten() {
@@ -712,7 +798,9 @@ export function Timeline({
     if (marks.length > 400) break;
   }
   const shaped = draft.tracks.find((track) => track.id === selectionTrack);
-  const shapedClip = shaped?.clips[0];
+  const shapedClip = shaped?.clips.find((clip) => clip.id === selectedClip) || shaped?.clips[0];
+  const menuTrack = menu ? draft.tracks.find((track) => track.id === menu.trackId) : undefined;
+  const menuClip = menuTrack?.clips.find((clip) => clip.id === menu?.clipId);
   const clipInRange = activeSelection
     ? draft.tracks.flatMap((track) => track.clips).find((clip) => clip.startSec < activeSelection.end && clip.startSec + clip.durationSec > activeSelection.start)
     : undefined;
@@ -754,9 +842,9 @@ export function Timeline({
         <button type="button" className="tl-tool" onClick={cut} disabled={!activeSelection}>Cut</button>
         <button type="button" className="tl-tool" onClick={copy} disabled={!activeSelection}>Copy</button>
         <button type="button" className="tl-tool" onClick={paste} disabled={!clipboard}>Paste</button>
-        <button type="button" className="tl-tool" onClick={split} disabled={!activeSelection}>Split</button>
+        <button type="button" className="tl-tool" onClick={split} disabled={!selectionTrack && !selectedClip} title="Split the selected track at the marker">Split</button>
         <button type="button" className="tl-tool" onClick={duplicate} disabled={!activeSelection}>Duplicate</button>
-        <button type="button" className="tl-tool" onClick={remove} disabled={!activeSelection}>Delete</button>
+        <button type="button" className="tl-tool" onClick={remove} disabled={!activeSelection && !selectionTrack && !selectedClip}>Delete</button>
         <button type="button" className="tl-tool" onClick={() => commit(blendOverlaps(draft))} disabled={!activeSelection}>Blend</button>
         <button type="button" className="tl-tool" onClick={tighten} disabled={!activeSelection}>Tighten</button>
         <button type="button" className="tl-tool" disabled={!activeSelection} onClick={() => activeSelection && commit(compSelection(draft, activeSelection.start, activeSelection.end))}>Comp</button>
@@ -807,7 +895,14 @@ export function Timeline({
         <div className="tl-sheet" style={{ width: HEAD + length * pxPerSec }}>
           <div className="tl-ruler-row">
             <div className="tl-head">Sections</div>
-            <div className="tl-ruler" onPointerDown={(event) => { stopPlayback(); setPlayhead(snapped(timeAt(event.clientX), 'off')); }}>
+            <div className="tl-ruler" onPointerDown={(event) => {
+              if ((event.target as HTMLElement).closest('.tl-section')) return;
+              stopPlayback();
+              const next = snapped(timeAt(event.clientX), 'off');
+              playRef.current = next;
+              setPlayhead(next);
+              dragRef.current = { kind: 'playhead', origin: next, x: event.clientX };
+            }}>
               {draft.sections.map((section) => (
                 <button
                   key={section.id}
@@ -829,7 +924,7 @@ export function Timeline({
           </div>
           {draft.tracks.map((track) => (
             <div className={`${track.take ? 'tl-row take' : 'tl-row'}${selectionTrack === track.id ? ' on' : ''}`} key={track.id}>
-              <div className="tl-head" onPointerDown={() => { setSelectionTrack(track.id); setSelection(null); }}>
+              <div className="tl-head" onPointerDown={() => { setSelectionTrack(track.id); setSelectedClip(''); setSelection(null); }} onContextMenu={(event) => openMenu(event, track.id)}>
                 <strong>{track.name}</strong>
                 <div className="tl-flags">
                   <button type="button" className={track.muted ? 'tl-flag on' : 'tl-flag'} aria-label="Mute" onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
@@ -844,12 +939,14 @@ export function Timeline({
                 onPointerDown={(event) => {
                   if ((event.target as HTMLElement).closest('.clip')) return;
                   setSelectionTrack(track.id);
+                  setSelectedClip('');
                   const origin = timeAt(event.clientX);
                   dragRef.current = { kind: 'select', origin };
                   setSelection({ start: origin, end: origin });
                 }}
+                onContextMenu={(event) => openMenu(event, track.id)}
               >
-                {activeSelection && activeSelection.end - activeSelection.start > 0.05 && (selectionTrack === '' || selectionTrack === track.id) && (
+                {activeSelection && !selectedClip && activeSelection.end - activeSelection.start > 0.05 && (selectionTrack === '' || selectionTrack === track.id) && (
                   <div className="tl-select" style={{ left: activeSelection.start * pxPerSec, width: (activeSelection.end - activeSelection.start) * pxPerSec }} />
                 )}
                 {track.clips.map((clip) => (
@@ -858,13 +955,17 @@ export function Timeline({
                     clip={clip}
                     px={pxPerSec}
                     color={LANE_COLORS[draft.tracks.indexOf(track) % LANE_COLORS.length]}
+                    selected={clip.id === selectedClip}
                     buffer={buffers.current.get(clip.assetId)}
                     version={waveVersion}
+                    onContextMenu={(event) => openMenu(event, track.id, clip.id)}
                     onPointerDown={(event, mode) => {
+                      if (event.button !== 0) return;
                       event.stopPropagation();
                       setSelectionTrack(track.id);
+                      setSelectedClip(clip.id);
                       if (mode === 'move') {
-                        setSelection({ start: clip.startSec, end: clip.startSec + clip.durationSec });
+                        setSelection(null);
                         const startDrag = () => { dragRef.current = { kind: 'move', clipId: clip.id, origin: clip.startSec, x: event.clientX }; };
                         if (event.pointerType === 'touch') {
                           const timer = window.setTimeout(startDrag, 380);
@@ -883,7 +984,18 @@ export function Timeline({
               </div>
             </div>
           ))}
-          <div className="tl-playhead" style={{ left: HEAD + playhead * pxPerSec }} />
+          <div className="tl-playhead" style={{ left: HEAD + playhead * pxPerSec }}>
+            <button
+              type="button"
+              className="tl-marker"
+              aria-label="Marker"
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                stopPlayback();
+                dragRef.current = { kind: 'playhead', origin: playRef.current, x: event.clientX };
+              }}
+            />
+          </div>
         </div>
       </div>
       <div className="mixer" aria-label="Mixer">
@@ -929,6 +1041,24 @@ export function Timeline({
           </article>
         ))}
       </div>
+      {menu && menuTrack && (
+        <div className="tl-menu" ref={menuRef} style={{ left: menu.x, top: menu.y }} onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" onClick={() => { setMenu(null); remove(); }}>{menuClip ? 'Delete clip' : 'Delete track'}</button>
+          {menuClip && <button type="button" onClick={() => { setMenu(null); commit(removeTrack(draft, menuTrack.id)); setSelectionTrack(''); setSelectedClip(''); setSelection(null); }}>Delete track</button>}
+          <button type="button" onClick={() => { setMenu(null); duplicate(); }}>Duplicate</button>
+          <button type="button" onClick={() => { setMenu(null); split(); }}>Split</button>
+          {onShape && (menuClip || menuTrack.clips[0]) && (
+            <>
+              <hr />
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('extend', clip.assetId, clip.durationSec); }}>Extend</button>
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('version', clip.assetId, clip.durationSec); }}>New version</button>
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('separate', clip.assetId, clip.durationSec); }}>Separate vocals</button>
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('vocals', clip.assetId, clip.durationSec); }}>Add a vocal</button>
+              <button type="button" onClick={() => { const clip = menuClip || menuTrack.clips[0]; setMenu(null); onShape('instrumental', clip.assetId, clip.durationSec); }}>Add instruments</button>
+            </>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -941,14 +1071,18 @@ function ClipView({
   color,
   buffer,
   version,
+  selected,
   onPointerDown,
+  onContextMenu,
 }: {
   clip: Clip;
   px: number;
   color: string;
   buffer?: AudioBuffer;
   version: number;
+  selected: boolean;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, mode: 'move' | 'start' | 'end' | 'fade-in' | 'fade-out') => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const width = Math.max(8, clip.durationSec * px);
@@ -982,10 +1116,11 @@ function ClipView({
 
   return (
     <div
-      className="clip"
+      className={selected ? 'clip on' : 'clip'}
       role="button"
       aria-label={clip.name}
       style={{ left: clip.startSec * px, width, background: color, borderColor: color }}
+      onContextMenu={onContextMenu}
       onPointerDown={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - bounds.left;
