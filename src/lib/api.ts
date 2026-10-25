@@ -7,7 +7,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
   });
   const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
+  let body: { error?: string } = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(response.ok ? 'The studio API returned a page instead of data.' : `Request failed (${response.status})`);
+    }
+  }
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body as T;
 }
