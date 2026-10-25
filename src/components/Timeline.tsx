@@ -75,6 +75,7 @@ export function Timeline({
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [selection, setSelection] = useState<Range | null>(null);
+  const [selectionTrack, setSelectionTrack] = useState('');
   const [loop, setLoop] = useState(false);
   const [clipboard, setClipboard] = useState<ClipClipboard | null>(null);
   const [recState, setRecState] = useState<'idle' | 'count' | 'rec'>('idle');
@@ -726,6 +727,7 @@ export function Timeline({
                   style={{ left: section.startSec * pxPerSec, width: Math.max(8, (section.endSec - section.startSec) * pxPerSec) }}
                   onPointerDown={(event) => {
                     event.stopPropagation();
+                    setSelectionTrack('');
                     setSelection({ start: section.startSec, end: section.endSec });
                     dragRef.current = { kind: 'section', sectionId: section.id, origin: section.startSec, x: event.clientX };
                   }}
@@ -737,27 +739,28 @@ export function Timeline({
             </div>
           </div>
           {draft.tracks.map((track) => (
-            <div className={track.take ? 'tl-row take' : 'tl-row'} key={track.id}>
-              <div className="tl-head">
+            <div className={`${track.take ? 'tl-row take' : 'tl-row'}${selectionTrack === track.id ? ' on' : ''}`} key={track.id}>
+              <div className="tl-head" onPointerDown={() => { setSelectionTrack(track.id); setSelection(null); }}>
                 <strong>{track.name}</strong>
                 <div className="tl-flags">
-                  <button type="button" className={track.muted ? 'chip on' : 'chip'} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
-                  <button type="button" className={track.solo ? 'chip on' : 'chip'} onClick={() => commit(setTrack(draft, track.id, { solo: !track.solo }))}>S</button>
+                  <button type="button" className={track.muted ? 'chip on' : 'chip'} onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
+                  <button type="button" className={track.solo ? 'chip on' : 'chip'} onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { solo: !track.solo }))}>S</button>
                 </div>
-                <input className="fader" type="range" min="0" max="1" step="0.01" value={track.volume} aria-label={`${track.name} level`} onChange={(event) => apply(setTrack(draftRef.current, track.id, { volume: Number(event.target.value) }))} onPointerUp={finish} />
-                <input className="fader" type="range" min="-1" max="1" step="0.01" value={track.pan} aria-label={`${track.name} pan`} onChange={(event) => apply(setTrack(draftRef.current, track.id, { pan: Number(event.target.value) }))} onPointerUp={finish} />
+                <input className="fader" type="range" min="0" max="1" step="0.01" value={track.volume} aria-label={`${track.name} level`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => apply(setTrack(draftRef.current, track.id, { volume: Number(event.target.value) }))} onPointerUp={finish} />
+                <input className="fader" type="range" min="-1" max="1" step="0.01" value={track.pan} aria-label={`${track.name} pan`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => apply(setTrack(draftRef.current, track.id, { pan: Number(event.target.value) }))} onPointerUp={finish} />
               </div>
               <div
                 className="tl-lane"
                 style={{ backgroundSize: `${beatPx}px 100%, ${beatPx * 4}px 100%` }}
                 onPointerDown={(event) => {
                   if ((event.target as HTMLElement).closest('.clip')) return;
+                  setSelectionTrack(track.id);
                   const origin = timeAt(event.clientX);
                   dragRef.current = { kind: 'select', origin };
                   setSelection({ start: origin, end: origin });
                 }}
               >
-                {activeSelection && (
+                {activeSelection && activeSelection.end - activeSelection.start > 0.05 && (selectionTrack === '' || selectionTrack === track.id) && (
                   <div className="tl-select" style={{ left: activeSelection.start * pxPerSec, width: (activeSelection.end - activeSelection.start) * pxPerSec }} />
                 )}
                 {track.clips.map((clip) => (
@@ -770,6 +773,7 @@ export function Timeline({
                     version={waveVersion}
                     onPointerDown={(event, mode) => {
                       event.stopPropagation();
+                      setSelectionTrack(track.id);
                       if (mode === 'move') {
                         setSelection({ start: clip.startSec, end: clip.startSec + clip.durationSec });
                         const startDrag = () => { dragRef.current = { kind: 'move', clipId: clip.id, origin: clip.startSec, x: event.clientX }; };

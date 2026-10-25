@@ -164,6 +164,7 @@ input:focus, textarea:focus, select:focus { border-color: #8d4a42; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 12px;
+  white-space: nowrap;
 }
 .btn.secondary { background: transparent; border-color: var(--line); color: var(--text); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -177,6 +178,8 @@ input:focus, textarea:focus, select:focus { border-color: #8d4a42; }
   border-radius: 4px;
   padding: 7px 10px;
   font-size: 13px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .chip.on { border-color: var(--red); background: #2a1210; }
 
@@ -320,23 +323,26 @@ audio.bare { width: 100%; }
 .tl { display: grid; gap: 8px; outline: none; }
 .tl-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
   padding: 8px;
   background: #0c0e12;
   border: 1px solid var(--line);
   border-radius: 6px;
+  overflow-x: auto;
 }
-.tl-clock { font-family: "IBM Plex Mono", monospace; font-size: 22px; letter-spacing: 0.06em; min-width: 92px; color: #f3efe4; }
-.tl-inline { display: flex; gap: 6px; align-items: center; text-transform: none; letter-spacing: 0; font-size: 12px; }
+.tl-clock { font-family: "IBM Plex Mono", monospace; font-size: 22px; letter-spacing: 0; min-width: 72px; color: #f3efe4; flex: 0 0 auto; }
+.tl-inline { display: flex; gap: 6px; align-items: center; text-transform: none; letter-spacing: 0; font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
 .tl-inline select { padding: 4px 8px; }
-.tl-edit { display: flex; flex-wrap: wrap; gap: 6px; }
+.tl-edit { display: flex; flex-wrap: nowrap; gap: 6px; flex: 0 0 auto; }
 .tl-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #0b0c0f; max-height: 520px; }
 .tl-sheet { position: relative; min-width: 100%; }
 .tl-ruler-row, .tl-row { display: grid; grid-template-columns: 188px 1fr; min-height: 28px; }
 .tl-row { min-height: 72px; border-top: 1px solid var(--line); }
-.tl-row.take { min-height: 58px; background: rgba(226, 59, 47, 0.04); }
+.tl-row.take { min-height: 58px; }
+.tl-row.on .tl-head { background: #2a1714; box-shadow: inset 3px 0 0 var(--red); }
+.tl-row.on .tl-lane { background-color: #1c1416; }
 .tl-head {
   position: sticky;
   left: 0;
@@ -348,7 +354,7 @@ audio.bare { width: 100%; }
   gap: 4px;
   align-content: center;
 }
-.tl-head strong { font-size: 11px; letter-spacing: 0.08em; }
+.tl-head strong { font-size: 11px; letter-spacing: 0.08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-flags { display: flex; gap: 4px; }
 .tl-ruler { position: relative; height: 46px; border-bottom: 1px solid var(--line); }
 .tl-mark { position: absolute; top: 24px; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); transform: translateX(-50%); }
@@ -363,6 +369,7 @@ audio.bare { width: 100%; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   overflow: hidden;
+  white-space: nowrap;
   padding: 0 6px;
   text-align: left;
 }
@@ -386,7 +393,9 @@ audio.bare { width: 100%; }
   cursor: grab;
 }
 .clip canvas { width: 100%; height: 100%; display: block; }
-.clip em { position: absolute; left: 8px; top: 4px; font-style: normal; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; pointer-events: none; }
+.clip em { position: absolute; left: 8px; top: 4px; right: 8px; font-style: normal; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.transport-play, .transport-rec { white-space: nowrap; flex: 0 0 auto; }
+.session-item strong, .session-item small, .session-meta, .strip-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clip-fade { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, #0b0c0f, transparent); pointer-events: none; }
 .clip-fade.out { right: 0; left: auto; background: linear-gradient(270deg, #0b0c0f, transparent); }
 .fade-handle { position: absolute; top: 0; width: 10px; height: 10px; border: 0; background: var(--text); padding: 0; }
