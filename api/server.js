@@ -1393,12 +1393,35 @@ var accounts = new AsyncLocalStorage();
 var ADMIN_EMAILS = new Set(
   String(process.env.ADMIN_EMAILS || "info@redfacepay.co.za").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean)
 );
+var verifiedSessions = /* @__PURE__ */ new Map();
+function bearer(req) {
+  const header2 = String(req.get("authorization") || "");
+  return header2.toLowerCase().startsWith("bearer ") ? header2.slice(7).trim() : "";
+}
+async function emailFromToken(token) {
+  if (!token) return "";
+  const hit = verifiedSessions.get(token);
+  if (hit && hit.until > Date.now()) return hit.email;
+  const base = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
+  if (!base || !key) return "";
+  const response = await fetch(`${base}/auth/v1/user`, {
+    headers: { apikey: key, Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) return "";
+  const body = await response.json().catch(() => ({}));
+  const email = String(body.email || "").trim().toLowerCase();
+  if (email) verifiedSessions.set(token, { email, until: Date.now() + 5 * 60 * 1e3 });
+  return email;
+}
 function bindAccount(req, next) {
-  const email = String(req.get("x-redsound-account") || "").trim().toLowerCase();
-  accounts.run(email, next);
+  emailFromToken(bearer(req)).then(
+    (email) => accounts.run(email, next),
+    () => accounts.run("", next)
+  );
 }
 function actorEmail() {
-  return accounts.getStore() || String(view().profile.email || "").trim().toLowerCase();
+  return accounts.getStore() || "";
 }
 function isAdmin() {
   return ADMIN_EMAILS.has(actorEmail());
@@ -1459,6 +1482,7 @@ function billingSnapshot() {
   };
 }
 function requireAccess(gate) {
+  if (!actorEmail()) throw new BillingError(401, "Sign in to use the studio.");
   if (isAdmin()) return;
   const subscription = currentSubscription();
   const plan = soundPlan(subscription?.planId);

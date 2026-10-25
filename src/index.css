@@ -392,6 +392,42 @@ audio.bare { width: 100%; }
 .strip-fx label { display: grid; grid-template-columns: auto 1fr; gap: 4px; align-items: center; }
 .fader.tall { writing-mode: vertical-lr; direction: rtl; height: 92px; width: 28px; justify-self: center; }
 
+.nav-foot { margin-top: auto; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+.gate {
+  min-height: 100vh;
+  display: grid;
+  align-content: start;
+  gap: 28px;
+  padding: 22px 28px 64px;
+  background:
+    radial-gradient(900px 420px at 10% -10%, rgba(226, 59, 47, 0.16), transparent 60%),
+    var(--bg);
+}
+.gate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gate-bar a { text-decoration: none; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; }
+.gate-bar .brand { letter-spacing: 0; text-transform: none; font-size: inherit; }
+.gate-hero { display: grid; gap: 14px; max-width: 760px; padding-top: 48px; }
+.gate-hero h1 { font-size: clamp(40px, 6vw, 68px); max-width: 12ch; }
+.gate-card {
+  width: min(440px, 100%);
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.gate-card h1 { font-size: 32px; }
+.gate-wait { margin: 24px; color: var(--muted); }
+
 @media (max-width: 900px) {
   .app, .session-layout, .desk, .grid-2, .split, .lane, .track { grid-template-columns: 1fr; }
   .nav { position: sticky; height: auto; z-index: 2; }
@@ -400,4 +436,7 @@ audio.bare { width: 100%; }
   .stage { padding: 14px; }
   .transport-rec { position: sticky; bottom: 8px; z-index: 5; min-height: 48px; font-size: 16px; }
   .mixer { padding-bottom: 12px; }
+  .gate { padding: 16px 16px 48px; }
+  .gate-hero { padding-top: 18px; }
+  .nav-foot { margin-top: 0; }
 }

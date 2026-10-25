@@ -25,13 +25,39 @@ const ADMIN_EMAILS = new Set(
     .filter(Boolean),
 );
 
+const verifiedSessions = new Map<string, { email: string; until: number }>();
+
+function bearer(req: express.Request): string {
+  const header = String(req.get('authorization') || '');
+  return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+}
+
+async function emailFromToken(token: string): Promise<string> {
+  if (!token) return '';
+  const hit = verifiedSessions.get(token);
+  if (hit && hit.until > Date.now()) return hit.email;
+  const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+  if (!base || !key) return '';
+  const response = await fetch(`${base}/auth/v1/user`, {
+    headers: { apikey: key, Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return '';
+  const body = await response.json().catch(() => ({})) as { email?: string };
+  const email = String(body.email || '').trim().toLowerCase();
+  if (email) verifiedSessions.set(token, { email, until: Date.now() + 5 * 60 * 1000 });
+  return email;
+}
+
 export function bindAccount(req: express.Request, next: () => void) {
-  const email = String(req.get('x-redsound-account') || '').trim().toLowerCase();
-  accounts.run(email, next);
+  emailFromToken(bearer(req)).then(
+    (email) => accounts.run(email, next),
+    () => accounts.run('', next),
+  );
 }
 
 function actorEmail(): string {
-  return accounts.getStore() || String(view().profile.email || '').trim().toLowerCase();
+  return accounts.getStore() || '';
 }
 
 export function isAdmin(): boolean {
@@ -102,6 +128,7 @@ export function billingSnapshot() {
 }
 
 export function requireAccess(gate: Gate) {
+  if (!actorEmail()) throw new BillingError(401, 'Sign in to use the studio.');
   if (isAdmin()) return;
   const subscription = currentSubscription();
   const plan = soundPlan(subscription?.planId);

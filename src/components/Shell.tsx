@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { readSession, signOut } from '../lib/session';
 
 export function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const libraryKind = new URLSearchParams(location.search).get('kind');
   const [query, setQuery] = useState('');
-  const [name, setName] = useState('Profile');
+  const [name, setName] = useState(readSession()?.email || 'Profile');
 
   useEffect(() => {
-    api.profile().then((profile) => setName(profile.displayName || 'Profile')).catch(() => setName('Profile'));
+    const email = readSession()?.email;
+    api.profile().then((profile) => setName(email || profile.displayName || 'Profile')).catch(() => setName(email || 'Profile'));
   }, []);
 
   return (
@@ -38,6 +40,9 @@ export function Shell() {
           <NavLink to="/rights">Rights</NavLink>
           <NavLink to="/earnings">Earnings</NavLink>
           <NavLink to="/plans">Plans</NavLink>
+        </div>
+        <div className="nav-group nav-foot">
+          <button className="nav-new" type="button" onClick={() => { signOut(); navigate('/'); }}>Sign out</button>
         </div>
       </aside>
       <div className="workspace">

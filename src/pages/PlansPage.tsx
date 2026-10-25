@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { formatZar } from '@shared/rights.ts';
-import { api, rememberAccount } from '../lib/api';
+import { api } from '../lib/api';
+import { readSession } from '../lib/session';
 
 type Billing = Awaited<ReturnType<typeof api.billing>>;
 
@@ -16,9 +17,8 @@ export function PlansPage() {
   function load() {
     return api.billing().then((next) => {
       setBilling(next);
-      const known = next.accountEmail || next.subscription?.email || '';
+      const known = next.accountEmail || next.subscription?.email || readSession()?.email || '';
       if (known) setEmail((current) => current || known);
-      if (next.admin && next.accountEmail) rememberAccount(next.accountEmail);
     });
   }
 
@@ -36,29 +36,10 @@ export function PlansPage() {
       .finally(() => { load().catch((reason: Error) => setError(reason.message)); });
   }, [params]);
 
-  async function saveAccount() {
-    setBusy('account');
-    setError('');
-    try {
-      rememberAccount(email);
-      await api.saveProfile({ email: email.trim().toLowerCase() });
-      const next = await api.billing();
-      setBilling(next);
-      setNote(next.admin
-        ? 'Admin access is on. This account is not billed.'
-        : 'Account saved. Subscribe to generate.');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Account was not saved.');
-    } finally {
-      setBusy('');
-    }
-  }
-
   async function subscribe(planId: string) {
     setBusy(planId);
     setError('');
     try {
-      rememberAccount(email);
       const result = await api.checkoutPlan(planId, email);
       window.location.assign(result.checkoutUrl);
     } catch (reason) {
@@ -74,7 +55,7 @@ export function PlansPage() {
       <div>
         <p className="kicker">Redface Pay</p>
         <h1>Plans</h1>
-        <p className="lede">Monthly access. Checkout opens on Redface Pay. The Paystack plan code and amount stay the same.</p>
+        <p className="lede">You are signed in. Checkout opens on Redface Pay. The Paystack plan code and amount stay the same.</p>
       </div>
       {error && <p className="error">{error}</p>}
       {note && <p className="meta">{note}</p>}
@@ -86,12 +67,9 @@ export function PlansPage() {
         </p>
       )}
       <label>
-        Account email
+        Receipt email
         <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@studio.co.za" autoComplete="email" />
       </label>
-      <button className="btn secondary" type="button" disabled={Boolean(busy)} onClick={saveAccount}>
-        {busy === 'account' ? 'Saving' : 'Save account'}
-      </button>
       <div className="cards">
         {billing?.plans.map((plan) => (
           <article className="card" key={plan.id}>
@@ -109,7 +87,11 @@ export function PlansPage() {
           </article>
         ))}
       </div>
-      {billing && !billing.payConfigured && <p className="meta">Add REDFACE_API_KEY on the server before a live charge can start.</p>}
+      {billing && !billing.payConfigured && (
+        <p className="meta">
+          Checkout needs a Redface Pay API key on the server. That key starts with rf_live_, is shown once when it is created, and only opens payment. It is not this login, and it is not what generates the music.
+        </p>
+      )}
     </div>
   );
 }

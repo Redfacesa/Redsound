@@ -1,27 +1,16 @@
 import type { Arrangement } from '@shared/arrange.ts';
 import type { AppConfig, LicenseGrant, Listing, Profile, Project, TaskRecord, TrackView } from '@shared/types.ts';
+import { ensureSession } from './session';
 
-const ACCOUNT_KEY = 'redsound-account';
-
-export function rememberAccount(email: string) {
-  const next = email.trim().toLowerCase();
-  if (next) localStorage.setItem(ACCOUNT_KEY, next);
-  else localStorage.removeItem(ACCOUNT_KEY);
-}
-
-function accountHeaders(): Record<string, string> {
-  try {
-    const email = localStorage.getItem(ACCOUNT_KEY) || '';
-    return email ? { 'x-redsound-account': email } : {};
-  } catch {
-    return {};
-  }
+async function authHeaders(): Promise<Record<string, string>> {
+  const current = await ensureSession();
+  return current ? { Authorization: `Bearer ${current.accessToken}` } : {};
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...accountHeaders(), ...(init?.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()), ...(init?.headers || {}) },
   });
   const text = await response.text();
   let body: { error?: string } = {};
