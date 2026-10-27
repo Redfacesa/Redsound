@@ -333,14 +333,15 @@ export function AssetPage() {
           }}
           onShape={(action, assetId, durationSec) => { void shapeClip(action, assetId, durationSec); }}
           onCapture={async (input) => {
-            const file = new File([input.blob], `${input.title}.webm`, { type: input.blob.type || 'audio/webm' });
+            const type = input.blob.type || 'audio/webm';
+            const filename = input.filename || `${input.title}.${type.includes('wav') ? 'wav' : type.includes('mpeg') ? 'mp3' : 'webm'}`;
             const saved = await api.upload({
-              filename: file.name,
-              contentType: file.type,
-              dataBase64: await fileToBase64(file),
+              filename,
+              contentType: type,
+              dataBase64: await fileToBase64(input.filename ? input.blob : new File([input.blob], filename, { type })),
               title: input.title,
-              kind: 'vocal',
-              origin: 'human_created',
+              kind: input.kind || 'vocal',
+              origin: input.filename ? 'imported' : 'human_created',
               parentAssetId: asset.id,
               durationSec: input.durationSec,
               bpm: asset.bpm,

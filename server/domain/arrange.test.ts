@@ -15,7 +15,9 @@ import {
   splitAt,
   trimClip,
   addVocalTake,
+  blankArrangement,
   duplicateChannel,
+  placeUpload,
   setClip,
   setChannel,
 } from '../../shared/arrange.ts';
@@ -184,4 +186,24 @@ test('removing a section leaves every clip in place', () => {
   assert.equal(next.tracks.length, arrangement.tracks.length);
   assert.equal(next.tracks[0].clips.length, arrangement.tracks[0].clips.length);
   assert.equal(next.tracks[0].clips[0].durationSec, arrangement.tracks[0].clips[0].durationSec);
+});
+
+test('an uploaded vocal and beat land on the empty lanes', () => {
+  seq = 0;
+  const arrangement = blankArrangement('session', 120, id);
+  const vocal = placeUpload(arrangement, { assetId: 'voice-file', title: 'My vocal', durationSec: 12, startSec: 4, kind: 'vocal' }, id);
+  const vocalLane = vocal.tracks.find((track) => track.assetId === 'voice-file');
+  assert.ok(vocalLane);
+  assert.equal(vocalLane.clips.length, 1);
+  assert.equal(vocalLane.clips[0].startSec, 4);
+  assert.equal(vocal.tracks.filter((track) => track.clips.length === 0).length, 1);
+  const both = placeUpload(vocal, { assetId: 'beat-file', title: 'My beat', durationSec: 20, startSec: 0, kind: 'beat' }, id);
+  const beatLane = both.tracks.find((track) => track.assetId === 'beat-file');
+  assert.ok(beatLane);
+  assert.equal(beatLane.clips[0].durationSec, 20);
+  assert.equal(both.tracks.length, arrangement.tracks.length);
+  const again = placeUpload(both, { assetId: 'beat-2', title: 'Second beat', durationSec: 8, startSec: 2, kind: 'beat' }, id);
+  assert.equal(again.tracks.length, arrangement.tracks.length + 1);
+  assert.equal(again.tracks.at(-1)?.assetId, 'beat-2');
+  assert.equal(beatLane.clips.length, 1);
 });

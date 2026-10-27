@@ -247,15 +247,14 @@ export function StudioPage() {
                 onShape={(action, assetId, durationSec) => { void shapeTake(action, assetId, durationSec); }}
                 onCapture={async (input) => {
                   const type = input.blob.type || 'audio/webm';
-                  const ext = type.includes('wav') ? 'wav' : 'webm';
-                  const file = new File([input.blob], `take.${ext}`, { type });
+                  const filename = input.filename || `take.${type.includes('wav') ? 'wav' : type.includes('mpeg') ? 'mp3' : 'webm'}`;
                   const saved = await api.upload({
-                    filename: file.name,
-                    contentType: file.type,
-                    dataBase64: await fileToBase64(file),
+                    filename,
+                    contentType: type,
+                    dataBase64: await fileToBase64(input.filename ? input.blob : new File([input.blob], filename, { type })),
                     title: input.title,
-                    kind: 'vocal',
-                    origin: 'human_created',
+                    kind: input.kind || 'vocal',
+                    origin: input.filename ? 'imported' : 'human_created',
                     parentAssetId: lead.id,
                     durationSec: input.durationSec,
                     bpm: lead.bpm,

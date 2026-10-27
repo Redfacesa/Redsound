@@ -14,6 +14,7 @@ import {
   moveClip,
   moveSection,
   pasteClipboard,
+  placeUpload,
   applyVocalPreset,
   removeClip,
   removeSection,
@@ -88,7 +89,7 @@ export function Timeline({
   sources: Record<string, string>;
   onCommit: (next: Arrangement) => void;
   onProduce?: (action: 'replace' | 'extend', range: Range) => void;
-  onCapture?: (input: { blob: Blob; durationSec: number; startSec: number; title: string }) => Promise<{ id: string; title: string }>;
+  onCapture?: (input: { blob: Blob; durationSec: number; startSec: number; title: string; kind?: 'vocal' | 'beat'; filename?: string }) => Promise<{ id: string; title: string }>;
   onShape?: (action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) => void;
   sessionName?: string;
   revealMaster?: number;
@@ -112,6 +113,9 @@ export function Timeline({
   const [deviceId, setDeviceId] = useState('');
   const [openChannel, setOpenChannel] = useState('');
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const importKind = useRef<'vocal' | 'beat'>('vocal');
+  const importTrack = useRef('');
   const streamRef = useRef<MediaStream | null>(null);
   const playingRef = useRef(false);
   const playGen = useRef(0);
@@ -560,6 +564,37 @@ export function Timeline({
     if (limitSec > 0.05) punchTimer.current = window.setTimeout(() => recorder.stop(), limitSec * 1000);
   }
 
+  async function importAudio(file: File | undefined, kind: 'vocal' | 'beat', trackId = '') {
+    if (!file || !onCapture) return;
+    setPlayNote(kind === 'beat' ? 'Adding the beat' : 'Adding the vocal');
+    try {
+      const decoded = await context().decodeAudioData((await file.arrayBuffer()).slice(0));
+      const title = file.name.replace(/\.[^.]+$/, '').slice(0, 80) || (kind === 'beat' ? 'Beat' : 'Vocal');
+      const saved = await onCapture({
+        blob: file,
+        durationSec: decoded.duration,
+        startSec: playRef.current,
+        title,
+        kind,
+        filename: file.name,
+      });
+      buffers.current.set(saved.id, decoded);
+      durations.current[saved.id] = decoded.duration;
+      setWaveVersion((version) => version + 1);
+      commit(placeUpload(draftRef.current, {
+        assetId: saved.id,
+        title: saved.title || title,
+        durationSec: decoded.duration,
+        startSec: playRef.current,
+        kind,
+        trackId,
+      }));
+      setPlayNote('');
+    } catch (reason) {
+      setPlayNote(reason instanceof Error ? reason.message : 'That file did not load.');
+    }
+  }
+
   async function toggleRecord() {
     if (!onCapture) return;
     if (recState === 'rec' || recState === 'count') {
@@ -837,6 +872,19 @@ export function Timeline({
               {recState === 'count' ? countBeat : <Mark name="record" />}
             </button>
             <button className={loopRec ? 'tl-tool on' : 'tl-tool'} type="button" onClick={() => setLoopRec((value) => !value)}>Loop rec</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.webm"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                void importAudio(file, importKind.current, importTrack.current);
+              }}
+            />
+            <button className="tl-tool" type="button" onClick={() => { importKind.current = 'vocal'; importTrack.current = ''; fileRef.current?.click(); }}>Upload vocal</button>
+            <button className="tl-tool" type="button" onClick={() => { importKind.current = 'beat'; importTrack.current = ''; fileRef.current?.click(); }}>Upload beat</button>
           </>
         )}
         <button className={loop ? 'tl-tool on' : 'tl-tool'} type="button" onClick={() => setLoop((value) => !value)}>Loop</button>
@@ -967,6 +1015,18 @@ export function Timeline({
                   setSelection({ start: origin, end: origin });
                 }}
                 onContextMenu={(event) => openMenu(event, track.id)}
+                onDragOver={(event) => {
+                  if (!onCapture || !event.dataTransfer.types.includes('Files')) return;
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  const file = event.dataTransfer.files?.[0];
+                  if (!onCapture || !file) return;
+                  event.preventDefault();
+                  const label = track.name.toLowerCase();
+                  const kind = label.includes('beat') || label.includes('drum') ? 'beat' : 'vocal';
+                  void importAudio(file, kind, track.clips.length ? '' : track.id);
+                }}
               >
                 {activeSelection && !selectedClip && activeSelection.end - activeSelection.start > 0.05 && (selectionTrack === '' || selectionTrack === track.id) && (
                   <div className="tl-select" style={{ left: activeSelection.start * pxPerSec, width: (activeSelection.end - activeSelection.start) * pxPerSec }} />

@@ -213,7 +213,10 @@ export async function saveUpload(input: {
     const recordingId = id();
     const assetId = id();
     const parent = input.parentAssetId ? db.assets.find((item) => item.id === input.parentAssetId) : undefined;
-    const components: ProvenanceComponent[] = [{ role: input.kind === 'vocal' ? 'vocal' : 'mix', origin: input.origin }];
+    const components: ProvenanceComponent[] = [{
+      role: input.kind === 'vocal' ? 'vocal' : input.kind === 'beat' ? 'instrumental' : 'mix',
+      origin: input.origin,
+    }];
     if (parent) {
       const parentProvenance = db.provenance.find((item) => item.assetId === parent.id);
       components.unshift({

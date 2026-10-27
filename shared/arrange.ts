@@ -292,6 +292,68 @@ export function addVocalTake(
   return { ...base, channels: [...(base.channels || []), channel], tracks: [...base.tracks, track] };
 }
 
+export function placeUpload(
+  arrangement: Arrangement,
+  input: { assetId: string; title: string; durationSec: number; startSec: number; kind: 'vocal' | 'beat'; trackId?: string },
+  newId: () => string = () => crypto.randomUUID(),
+): Arrangement {
+  const base = ensureMixer(arrangement, newId);
+  const clip = {
+    id: newId(),
+    assetId: input.assetId,
+    name: input.title,
+    startSec: Math.max(0, input.startSec),
+    offsetSec: 0,
+    durationSec: Math.max(0.05, input.durationSec),
+    fadeInSec: 0,
+    fadeOutSec: 0,
+  };
+  const named = input.trackId ? base.tracks.find((track) => track.id === input.trackId && track.clips.length === 0) : undefined;
+  const empty = named || base.tracks.find((track) => {
+    if (track.clips.length) return false;
+    const name = track.name.toLowerCase();
+    return input.kind === 'vocal' ? name.includes('vocal') : name.includes('beat');
+  });
+  if (empty) {
+    return {
+      ...base,
+      tracks: base.tracks.map((track) => (
+        track.id === empty.id ? { ...track, assetId: input.assetId, name: input.title, clips: [clip] } : track
+      )),
+    };
+  }
+  if (input.kind === 'vocal') {
+    const next = addVocalTake(base, input, newId);
+    const added = next.tracks[next.tracks.length - 1];
+    return added ? setTrack(next, added.id, { name: input.title }) : next;
+  }
+  const drumBus = base.channels?.find((channel) => channel.role === 'drum-bus');
+  const channelId = newId();
+  const channel: MixerChannel = {
+    id: channelId,
+    name: input.title,
+    kind: 'channel',
+    role: 'beat',
+    volume: 0.85,
+    pan: 0,
+    muted: false,
+    effects: effectChain(newId),
+    busId: drumBus?.id,
+  };
+  const track: ArrangeTrack = {
+    id: newId(),
+    name: input.title,
+    assetId: input.assetId,
+    channelId,
+    muted: false,
+    solo: false,
+    volume: 0.85,
+    pan: 0,
+    clips: [clip],
+  };
+  return { ...base, channels: [...(base.channels || []), channel], tracks: [...base.tracks, track] };
+}
+
 export function duplicateChannel(arrangement: Arrangement, channelId: string, newId: () => string = () => crypto.randomUUID()): Arrangement {
   const base = ensureMixer(arrangement, newId);
   const source = base.channels?.find((channel) => channel.id === channelId);
