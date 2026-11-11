@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { readSession, signOut } from '../lib/session';
+import { Mark } from './Mark';
 
 export function Shell() {
   const navigate = useNavigate();
@@ -19,8 +20,11 @@ export function Shell() {
     <div className="app">
       <aside className="nav">
         <div className="brand">
-          <strong>RED SOUND</strong>
-          <span>STUDIO</span>
+          <Mark />
+          <span className="brand-name">
+            <strong>RED SOUND</strong>
+            <span>STUDIO</span>
+          </span>
         </div>
         <div className="nav-group">
           <div className="nav-label">STUDIO</div>

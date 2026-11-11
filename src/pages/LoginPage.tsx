@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Mark } from '../components/Mark';
 import { signIn, signUp } from '../lib/session';
 
 export function LoginPage() {
@@ -29,8 +30,11 @@ export function LoginPage() {
     <main className="gate">
       <header className="gate-bar">
         <Link to="/" className="brand">
-          <strong>RED SOUND</strong>
-          <span>STUDIO</span>
+          <Mark />
+          <span className="brand-name">
+            <strong>RED SOUND</strong>
+            <span>STUDIO</span>
+          </span>
         </Link>
       </header>
       <form className="gate-card" onSubmit={submit}>
