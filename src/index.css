@@ -690,13 +690,15 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .home-plan-grid p { margin: 0; }
 .home-plan-grid .price { margin: 8px 0; }
 
-.shot-root { width: 100vw; min-height: 100vh; padding: 14px 12px 20px; display: grid; align-content: start; gap: 8px; background: #070708; overflow: hidden; }
+body:has(.shot-root) { width: 100vw; overflow: hidden; }
+.shot-root { width: 100vw; max-width: 100vw; min-height: 100vh; padding: 14px 12px 20px; display: block; background: #070708; overflow: hidden; }
 .shot-bar { display: flex; align-items: center; gap: 8px; }
 .shot-bar strong { letter-spacing: 0.14em; font-size: 12px; }
 .shot-bar span { margin-left: auto; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; }
 .shot-title h1 { font-size: 34px; letter-spacing: -0.03em; }
-.shot-root .tl, .shot-root .tl-scroll, .shot-root .tl-bar { width: 100%; max-width: 100%; min-width: 0; }
-.shot-root .tl-scroll { max-height: none; }
+.shot-root .tl { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-width: 0; margin-top: 8px; }
+.shot-root .tl-scroll, .shot-root .tl-bar { width: 100%; max-width: 100%; min-width: 0; }
+.shot-root .tl-scroll { max-height: none; overflow: auto; }
 .shot-root .tl-bar { flex-wrap: wrap; overflow: hidden; }
 
 @media (max-width: 900px) {

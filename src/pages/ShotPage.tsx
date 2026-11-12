@@ -80,6 +80,23 @@ export function ShotPage() {
 
   return (
     <main className="shot-root">
+      <style>{`
+        html, body { width: 100vw; max-width: 100vw; overflow: hidden; }
+        .shot-root .tl-bar {
+          display: flex;
+          flex-wrap: wrap;
+          width: calc(100vw - 24px);
+          max-width: calc(100vw - 24px);
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .shot-root .tl, .shot-root .tl-scroll {
+          width: calc(100vw - 24px);
+          max-width: calc(100vw - 24px);
+          min-width: 0;
+          overflow: hidden;
+        }
+      `}</style>
       <header className="shot-bar">
         <Mark size={22} />
         <strong>RED SOUND</strong>
