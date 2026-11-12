@@ -62,20 +62,37 @@ export function LandingPage() {
             <a className="btn secondary" href="#rooms">See the rooms</a>
           </div>
         </div>
-        <div className="home-session" aria-hidden="true">
-          <div className="home-session-top">
+        <div className="home-studio">
+          <div className="home-studio-top">
             <strong>Night drive</strong>
-            <span>128 · C min</span>
+            <span>C min</span>
           </div>
-          <div className="home-lanes">
+          <div className="home-studio-readout">
+            <i />
+            <em>00:00.000</em>
+            <em>001.1.1</em>
+            <span>128 BPM</span>
+            <span>4/4</span>
+          </div>
+          <div className="home-studio-ruler" aria-hidden="true">
+            {[1, 3, 5, 7, 9, 11, 13, 15, 17].map((bar) => <span key={bar}>{bar}</span>)}
+          </div>
+          <div className="home-studio-sheet">
             {sides.map(([name, width, color]) => (
-              <div className="home-lane" key={name}>
-                <b>{name}</b>
-                <i style={{ width, background: color }} />
+              <div className="home-studio-row" key={name}>
+                <b style={{ borderLeftColor: color }}>{name}</b>
+                <span>
+                  <i style={{ width, background: color }} />
+                </span>
               </div>
             ))}
             <div className="home-playhead" />
           </div>
+          <Link className="home-studio-ask" to={open('beat')}>
+            <span>Beat</span>
+            <em>Build a gritty pocket and put it on this track</em>
+            <strong>V6</strong>
+          </Link>
         </div>
       </section>
 

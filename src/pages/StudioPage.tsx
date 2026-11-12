@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addVocalTake, setTrack, type Arrangement } from '@shared/arrange.ts';
+import { addVocalTake, placeUpload, setTrack, type Arrangement } from '@shared/arrange.ts';
 import type { TaskRecord, TrackView } from '@shared/types.ts';
 import { Timeline } from '../components/Timeline';
 import { api, fileToBase64, pollTask } from '../lib/api';
@@ -132,6 +132,67 @@ export function StudioPage() {
     }
   }
 
+  async function askTrack(input: { prompt: string; trackId: string; assetId?: string; durationSec?: number }) {
+    if (!lead || !session || !arrangement) return;
+    setError('');
+    setJob(input.assetId ? 'Putting it on this track' : 'Building this track');
+    try {
+      const tempo = arrangement.bpm || lead.bpm || bpm;
+      const key = lead.musicalKey || musicalKey;
+      const task = input.assetId
+        ? await api.instrumental(input.assetId, {
+          tags: input.prompt,
+          title: lead.title,
+          lyrics: '',
+          bpm: tempo,
+          musicalKey: key,
+          single: true,
+        })
+        : await api.generate({
+          prompt: input.prompt,
+          style: input.prompt,
+          title: session.title,
+          instrumental: true,
+          model: 'V6',
+          bpm: tempo,
+          musicalKey: key,
+        });
+      const done = await pollTask(task.id);
+      if (done.status !== 'SUCCESS' && done.status !== 'FIRST_SUCCESS') throw new Error(done.error || 'That pass did not finish.');
+      const nextSessions = await api.projects();
+      setSessions(nextSessions);
+      const fresh = nextSessions.find((item) => item.id === session.id);
+      if (fresh) {
+        let next = arrangement;
+        const added: Record<string, string> = {};
+        const newcomers = fresh.assets.filter((asset) => {
+          if (!asset.audioUrl) return false;
+          return !next.tracks.some((track) => track.assetId === asset.id || track.clips.some((clip) => clip.assetId === asset.id));
+        });
+        for (const asset of newcomers.slice(0, 1)) {
+          next = placeUpload(next, {
+            assetId: asset.id,
+            title: asset.title,
+            durationSec: asset.durationSec || 30,
+            startSec: 0,
+            kind: 'beat',
+            trackId: input.trackId,
+          });
+          if (asset.audioUrl) added[asset.id] = asset.audioUrl;
+        }
+        if (next !== arrangement) {
+          setArrangement(next);
+          void api.saveArrangement(lead.id, next);
+        }
+        if (Object.keys(added).length) setExtraSources((sources) => ({ ...sources, ...added }));
+      }
+      setJob('');
+    } catch (reason) {
+      setError(studioError(reason instanceof Error ? reason.message : 'That pass failed.'));
+      setJob('');
+    }
+  }
+
   async function dropSession(id: string, name: string) {
     if (!window.confirm(`Delete “${name}” and its recordings? This cannot be undone.`)) return;
     setError('');
@@ -245,6 +306,7 @@ export function StudioPage() {
                   }).then(() => setJob('Replacing section')).catch((reason: Error) => { setError(studioError(reason.message)); setJob(''); });
                 }}
                 onShape={(action, assetId, durationSec) => { void shapeTake(action, assetId, durationSec); }}
+                onPrompt={(input) => { void askTrack(input); }}
                 onCapture={async (input) => {
                   const type = input.blob.type || 'audio/webm';
                   const filename = input.filename || `take.${type.includes('wav') ? 'wav' : type.includes('mpeg') ? 'mp3' : 'webm'}`;

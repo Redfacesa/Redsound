@@ -37,7 +37,6 @@ import {
 import { bounceArrangement, downloadBlob } from '../lib/bounce';
 import { buildDesk, scheduleArrangement } from '../lib/mix';
 import { encodeWav, studioVocal } from '../lib/restore';
-import { clock } from '../lib/studio';
 
 const HEAD = 188;
 const LANE_COLORS = ['#8d3a32', '#c4a15a', '#c9b84a', '#3f8f86', '#4d6ea8', '#8a6aad', '#c46b4a'];
@@ -58,6 +57,21 @@ type Drag =
   | { kind: 'select'; origin: number }
   | { kind: 'playhead'; origin: number; x: number }
   | { kind: 'section'; sectionId: string; origin: number; x: number };
+
+function fineClock(seconds: number) {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  const minutes = Math.floor(safe / 60);
+  const remain = Math.floor(safe % 60);
+  const millis = Math.floor((safe % 1) * 1000);
+  return `${String(minutes).padStart(2, '0')}:${String(remain).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+}
+
+function barReadout(seconds: number, bpm: number) {
+  const beat = Math.max(0, seconds) * (Math.max(bpm, 1) / 60);
+  const bar = Math.floor(beat / 4) + 1;
+  const step = Math.floor(beat % 4) + 1;
+  return `${String(bar).padStart(3, '0')}.${step}.1`;
+}
 
 function Mark({ name }: { name: 'play' | 'pause' | 'stop' | 'record' | 'undo' | 'redo' | 'plus' | 'minus' }) {
   return (
@@ -81,6 +95,7 @@ export function Timeline({
   onProduce,
   onCapture,
   onShape,
+  onPrompt,
   sessionName,
   revealMaster = 0,
   bounceSignal = 0,
@@ -91,6 +106,7 @@ export function Timeline({
   onProduce?: (action: 'replace' | 'extend', range: Range) => void;
   onCapture?: (input: { blob: Blob; durationSec: number; startSec: number; title: string; kind?: 'vocal' | 'beat'; filename?: string }) => Promise<{ id: string; title: string }>;
   onShape?: (action: 'extend' | 'version' | 'separate' | 'vocals' | 'instrumental', assetId: string, durationSec: number) => void;
+  onPrompt?: (input: { prompt: string; trackId: string; assetId?: string; durationSec?: number }) => void;
   sessionName?: string;
   revealMaster?: number;
   bounceSignal?: number;
@@ -112,6 +128,8 @@ export function Timeline({
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [openChannel, setOpenChannel] = useState('');
+  const [ask, setAsk] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const importKind = useRef<'vocal' | 'beat'>('vocal');
@@ -838,11 +856,14 @@ export function Timeline({
 
   const length = arrangementEnd(draft);
   const beatPx = (60 / Math.max(draft.bpm, 1)) * pxPerSec;
-  const marks = [];
-  for (let time = 0; time <= length; time += Math.max(beatPx > 28 ? 60 / draft.bpm : (60 / draft.bpm) * 4, 0.01)) {
-    marks.push(time);
-    if (marks.length > 400) break;
+  const barSec = beatPx * 4 / pxPerSec;
+  const bars: number[] = [];
+  for (let bar = 1; (bar - 1) * barSec <= length; bar += 1) {
+    bars.push(bar);
+    if (bars.length > 240) break;
   }
+  const askedTrack = draft.tracks.find((track) => track.id === selectionTrack) || draft.tracks[0];
+  const askedClip = askedTrack?.clips.find((clip) => clip.id === selectedClip) || askedTrack?.clips[0];
   const shaped = draft.tracks.find((track) => track.id === selectionTrack);
   const shapedClip = shaped?.clips.find((clip) => clip.id === selectedClip) || shaped?.clips[0];
   const menuTrack = menu ? draft.tracks.find((track) => track.id === menu.trackId) : undefined;
@@ -860,7 +881,10 @@ export function Timeline({
         <button className="tl-btn" type="button" aria-label="Redo" onClick={redo}><Mark name="redo" /></button>
         <button className="tl-btn" type="button" aria-label="Zoom out" onClick={() => zoomTo.current(zoomRef.current / 1.25)}><Mark name="minus" /></button>
         <button className="tl-btn" type="button" aria-label="Zoom in" onClick={() => zoomTo.current(zoomRef.current * 1.25)}><Mark name="plus" /></button>
-        <span className="tl-clock">{clock(playhead)}</span>
+        <span className="tl-clock">{fineClock(playhead)}</span>
+        <span className="tl-bars">{barReadout(playhead, draft.bpm)}</span>
+        <span className="tl-tempo">{draft.bpm} BPM</span>
+        <span className="tl-tempo">4/4</span>
         {playNote && <span className="tl-note">{playNote}</span>}
         {onCapture && (
           <>
@@ -883,8 +907,15 @@ export function Timeline({
                 void importAudio(file, importKind.current, importTrack.current);
               }}
             />
-            <button className="tl-tool" type="button" onClick={() => { importKind.current = 'vocal'; importTrack.current = ''; fileRef.current?.click(); }}>Upload vocal</button>
-            <button className="tl-tool" type="button" onClick={() => { importKind.current = 'beat'; importTrack.current = ''; fileRef.current?.click(); }}>Upload beat</button>
+            <div className="tl-add">
+              <button className="tl-btn" type="button" aria-label="Add to the session" aria-expanded={addOpen} onClick={() => setAddOpen((open) => !open)}><Mark name="plus" /></button>
+              {addOpen && (
+                <div className="tl-add-menu">
+                  <button type="button" onClick={() => { setAddOpen(false); importKind.current = 'vocal'; importTrack.current = ''; fileRef.current?.click(); }}>Upload vocal</button>
+                  <button type="button" onClick={() => { setAddOpen(false); importKind.current = 'beat'; importTrack.current = ''; fileRef.current?.click(); }}>Upload beat</button>
+                </div>
+              )}
+            </div>
           </>
         )}
         <button className={loop ? 'tl-tool on' : 'tl-tool'} type="button" onClick={() => setLoop((value) => !value)}>Loop</button>
@@ -987,14 +1018,14 @@ export function Timeline({
                   }}
                 >{section.name}</button>
               ))}
-              {marks.map((time) => (
-                <span key={time} className="tl-mark" style={{ left: time * pxPerSec }}>{clock(time)}</span>
+              {bars.map((bar) => (
+                <span key={bar} className="tl-mark" style={{ left: (bar - 1) * barSec * pxPerSec }}>{bar}</span>
               ))}
             </div>
           </div>
           {draft.tracks.map((track) => (
             <div className={`${track.take ? 'tl-row take' : 'tl-row'}${selectionTrack === track.id ? ' on' : ''}`} key={track.id}>
-              <div className="tl-head" onPointerDown={() => { setSelectionTrack(track.id); setSelectedClip(''); setSelection(null); }} onContextMenu={(event) => openMenu(event, track.id)}>
+              <div className="tl-head" style={{ ['--lane' as string]: LANE_COLORS[draft.tracks.indexOf(track) % LANE_COLORS.length] }} onPointerDown={() => { setSelectionTrack(track.id); setSelectedClip(''); setSelection(null); }} onContextMenu={(event) => openMenu(event, track.id)}>
                 <strong>{track.name}</strong>
                 <div className="tl-flags">
                   <button type="button" className={track.muted ? 'tl-flag on' : 'tl-flag'} aria-label="Mute" onPointerDown={(event) => event.stopPropagation()} onClick={() => commit(setTrack(draft, track.id, { muted: !track.muted }))}>M</button>
@@ -1080,6 +1111,20 @@ export function Timeline({
           </div>
         </div>
       </div>
+      {onPrompt && (
+        <form className="tl-prompt" onSubmit={(event) => {
+          event.preventDefault();
+          const prompt = ask.trim();
+          if (!prompt || !askedTrack) return;
+          onPrompt({ prompt, trackId: askedTrack.id, assetId: askedClip?.assetId, durationSec: askedClip?.durationSec });
+          setAsk('');
+        }}>
+          <span>{askedTrack?.name || 'Audio track'}</span>
+          <input value={ask} onChange={(event) => setAsk(event.target.value)} placeholder="Build it and put it on this track" aria-label="Ask for this track" />
+          <em>V6</em>
+          <button className="tl-btn" type="submit" aria-label="Put it on this track" disabled={!ask.trim() || !askedTrack}><Mark name="play" /></button>
+        </form>
+      )}
       <div className="mixer" aria-label="Mixer">
         {(draft.channels || []).map((channel) => (
           <article key={channel.id} className={openChannel === channel.id ? 'strip open' : 'strip'}>
