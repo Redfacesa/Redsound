@@ -19,6 +19,7 @@ export function CreatePage() {
   const [instruments, setInstruments] = useState<string[]>(['Drums', 'Bass', 'Keys']);
   const [voice, setVoice] = useState<'none' | 'm' | 'f' | string>('none');
   const [lyrics, setLyrics] = useState('');
+  const [beat, setBeat] = useState('');
   const [pattern, setPattern] = useState('Four on the floor');
   const [soundLoop, setSoundLoop] = useState(false);
   const [voices, setVoices] = useState<TrackView[]>([]);
@@ -65,7 +66,23 @@ export function CreatePage() {
     else setError('That pass finished. Open it from Studio.');
   }
 
+  function beatStyle() {
+    const made = beat.trim();
+    const picked = instruments.length ? instruments.join(', ') : 'drums and bass';
+    return `${made}. ${genre}, ${bpm} BPM, ${musicalKey}, ${picked}. Instrumental, no vocals.`;
+  }
+
   async function generate() {
+    if (room === 'beat') {
+      if (voice !== 'none') {
+        setError('A beat has no singer. Leave Voice on No voice, or open Song and write the words.');
+        return;
+      }
+      if (beat.trim().length < 12) {
+        setError('Write the beat first. Name the drums, the bass, and the mood. Tempo, key, and the instruments you picked are added to your words.');
+        return;
+      }
+    }
     setBusy(true);
     setError('');
     const savedVoice = voices.find((item) => item.provenance?.personaId === voice || item.provenance?.voiceId === voice);
@@ -73,17 +90,18 @@ export function CreatePage() {
     try {
       const task = await api.generate({
         title,
-        style: arrangementStyle(),
+        style: room === 'beat' ? beatStyle() : arrangementStyle(),
         lyrics: room === 'song' ? lyrics : undefined,
+        negativeTags: room === 'beat' ? 'vocals, singing, speech' : undefined,
         instrumental,
         customMode: true,
         model: config?.model || 'V6',
         duration: length,
         bpm,
         musicalKey,
-        vocalGender: voice === 'm' || voice === 'f' ? voice : undefined,
-        personaId: savedVoice ? voice : undefined,
-        personaModel: savedVoice ? 'voice_persona' : undefined,
+        vocalGender: room === 'beat' ? undefined : voice === 'm' || voice === 'f' ? voice : undefined,
+        personaId: room === 'beat' ? undefined : savedVoice ? voice : undefined,
+        personaModel: room === 'beat' ? undefined : savedVoice ? 'voice_persona' : undefined,
       });
       await follow(task.id, 'generate');
     } catch (reason) {
@@ -203,6 +221,20 @@ export function CreatePage() {
               </div>
             </div>
           )}
+          {room === 'beat' && (
+            <div className="stack">
+              <label>
+                The beat
+                <textarea
+                  value={beat}
+                  onChange={(event) => setBeat(event.target.value)}
+                  placeholder="Dark hip-hop, dusty kicks, sparse hats, deep bass, no melody on top."
+                />
+              </label>
+              <p className="meta">Write the beat in your own words before you press Generate. Name the drums, the bass, and the mood. A beat has no singer, so leave Voice on No voice.</p>
+              <p className="meta">{beat.trim().length >= 12 ? `This is the beat that gets made: ${beatStyle()}` : 'Generate stays off until the beat is written. Tempo, key, and the instruments you picked are added to your words.'}</p>
+            </div>
+          )}
           {(room === 'beat' || room === 'song') && (
             <div>
               <div className="kicker">Voice</div>
@@ -304,7 +336,7 @@ export function CreatePage() {
                 <button className="btn secondary" type="button" disabled={busy || !ready} onClick={draftLyrics}>Draft lyrics</button>
               </>
             ) : room === 'beat' ? (
-              <button className="btn arm" type="button" disabled={busy || !ready} onClick={generate}>Generate</button>
+              <button className="btn arm" type="button" disabled={busy || !ready || beat.trim().length < 12} onClick={generate}>Generate</button>
             ) : null}
             {!ready && <span className="meta">Studio engine offline</span>}
           </div>
