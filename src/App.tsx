@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage';
 import { MarketPage } from './pages/MarketPage';
 import { PlansPage } from './pages/PlansPage';
 import { RightsPage } from './pages/RightsPage';
+import { ShotPage } from './pages/ShotPage';
 import { StudioPage } from './pages/StudioPage';
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/shots/:frame" element={<ShotPage />} />
         <Route element={<RequireAuth />}>
           <Route element={<Shell />}>
             <Route path="/create" element={<CreatePage />} />
