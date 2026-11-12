@@ -19,7 +19,8 @@ export function LoginPage() {
     try {
       if (joining) await signUp(email, password);
       else await signIn(email, password);
-      navigate('/studio');
+      const next = params.get('next') || '';
+      navigate(next.startsWith('/create') || next.startsWith('/studio') ? next : '/studio');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Sign-in failed.');
       setBusy(false);

@@ -7,6 +7,7 @@ import { EarningsPage } from './pages/EarningsPage';
 import { LandingPage } from './pages/LandingPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { LoginPage } from './pages/LoginPage';
+import { NoticePage } from './pages/NoticePage';
 import { MarketPage } from './pages/MarketPage';
 import { PlansPage } from './pages/PlansPage';
 import { RightsPage } from './pages/RightsPage';
@@ -19,6 +20,11 @@ export function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/about" element={<NoticePage />} />
+        <Route path="/contact" element={<NoticePage />} />
+        <Route path="/terms" element={<NoticePage />} />
+        <Route path="/privacy" element={<NoticePage />} />
+        <Route path="/copyright" element={<NoticePage />} />
         <Route path="/shots/:frame" element={<ShotPage />} />
         <Route element={<RequireAuth />}>
           <Route element={<Shell />}>

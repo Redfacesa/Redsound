@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { AppConfig, TrackView } from '@shared/types.ts';
 import { api, fileToBase64, pollTask } from '../lib/api';
 import { GENRES, INSTRUMENTS, KEYS, LENGTHS, clock, jobLabel, studioError } from '../lib/studio';
@@ -8,6 +8,7 @@ type Room = 'beat' | 'song' | 'voice' | 'instrument';
 
 export function CreatePage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [room, setRoom] = useState<Room>('beat');
   const [title, setTitle] = useState('Midnight');
@@ -32,6 +33,11 @@ export function CreatePage() {
   const [error, setError] = useState('');
 
   const ready = Boolean(config?.sunoConfigured);
+
+  useEffect(() => {
+    const roomParam = params.get('room');
+    if (roomParam === 'beat' || roomParam === 'song' || roomParam === 'voice' || roomParam === 'instrument') setRoom(roomParam);
+  }, [params]);
 
   useEffect(() => {
     api.config().then(setConfig).catch((reason: Error) => setError(studioError(reason.message)));

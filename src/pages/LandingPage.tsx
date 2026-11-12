@@ -1,110 +1,160 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mark } from '../components/Mark';
 import { readSession } from '../lib/session';
-import { SOUND_PLANS } from '@shared/plans.ts';
 
-const trades = [
-  { name: 'Film', copy: 'Score the scene. The arrival, the tension, the ending.' },
-  { name: 'Video', copy: 'Background sound under a cut, finished in the same session.' },
-  { name: 'Beats', copy: 'A melody and drums, started on the phone and kept on the timeline.' },
-  { name: 'Samples', copy: 'Loops and one-shots for a song you are already writing.' },
+const rooms = [
+  { name: 'Songs', copy: 'Lyric, melody, vocal.', room: 'song', tone: '#e23b2f', ink: '#fff', bpm: '96', wave: [4, 8, 14, 10, 18, 12, 20, 9, 16, 7, 13, 5] },
+  { name: 'Beats', copy: 'Drums, bass, pocket.', room: 'beat', tone: '#c4a15a', ink: '#1a140c', bpm: '128', wave: [6, 16, 4, 18, 5, 14, 4, 17, 6, 15, 4, 12] },
+  { name: 'Samples', copy: 'Loops you can drop in.', room: 'instrument', tone: '#3f8f86', ink: '#041614', bpm: '120', wave: [8, 8, 14, 14, 6, 6, 16, 16, 7, 7, 12, 12] },
+  { name: 'Score', copy: 'The bed under a scene.', room: 'beat', tone: '#4d6ea8', ink: '#f4f7fb', bpm: '72', wave: [6, 9, 12, 16, 18, 16, 12, 9, 7, 10, 14, 11] },
+  { name: 'Effects', copy: 'A hit, a room, a texture.', room: 'instrument', tone: '#c46b4a', ink: '#1c0d08', bpm: '—', wave: [3, 18, 4, 8, 20, 3, 6, 14, 4, 9, 3, 7] },
+  { name: 'Picture', copy: 'Sound for the cut.', room: 'beat', tone: '#8a6aad', ink: '#f7f3fb', bpm: '100', wave: [10, 12, 8, 15, 11, 18, 9, 14, 8, 16, 10, 7] },
+  { name: 'Briefs', copy: 'A jingle from a line.', room: 'song', tone: '#8d3a32', ink: '#fff6f4', bpm: '110', wave: [7, 11, 15, 9, 13, 17, 8, 12, 16, 6, 10, 14] },
+  { name: 'Strange', copy: 'Keep it if it works.', room: 'instrument', tone: '#d7c48a', ink: '#1c180e', bpm: '90', wave: [5, 14, 7, 18, 4, 11, 16, 6, 13, 8, 17, 5] },
 ];
 
-const shots = [
-  { id: 'scene', name: 'Film' },
-  { id: 'record', name: 'Record' },
-  { id: 'beats', name: 'Beats' },
-  { id: 'samples', name: 'Samples' },
+const sides = [
+  ['Vocal', '72%', '#c4a15a'],
+  ['Beat', '88%', '#8d3a32'],
+  ['Score', '54%', '#3f8f86'],
+  ['Sample', '36%', '#4d6ea8'],
+] as const;
+
+const floor = [
+  ['01', 'Artists', 'A lyric and a melody, kept as a song.'],
+  ['02', 'Producers', 'A beat, a sample, and your own files on the timeline.'],
+  ['03', 'Film', 'Describe the scene. The score stays in the session.'],
+  ['04', 'Picture', 'Background for a video, a reel, or a cut.'],
+  ['05', 'Business', 'A short piece from a brief.'],
 ];
 
 export function LandingPage() {
   const signedIn = Boolean(readSession());
-  const enter = signedIn ? '/studio' : '/login';
-  const [store, setStore] = useState<'apple' | 'play'>('apple');
+  function open(room: string) {
+    const next = `/create?room=${room}`;
+    return signedIn ? next : `/login?join=1&next=${encodeURIComponent(next)}`;
+  }
   return (
     <main className="home">
       <header className="home-bar">
         <Link to="/" className="brand">
-          <Mark size={36} />
+          <Mark size={32} />
           <span className="brand-name">
             <strong>RED SOUND</strong>
             <span>STUDIO</span>
           </span>
         </Link>
         <nav className="home-nav">
-          <a href="#trades">Who it is for</a>
-          <a href="#shots">The app</a>
-          <Link to={enter}>{signedIn ? 'Open studio' : 'Sign in'}</Link>
-          <Link className="btn" to={signedIn ? '/studio' : '/login?join=1'}>{signedIn ? 'Open studio' : 'Create account'}</Link>
+          <a href="#floor">The floor</a>
+          <a href="#rooms">Rooms</a>
+          <Link to={signedIn ? '/studio' : '/login'}>{signedIn ? 'Open studio' : 'Sign in'}</Link>
+          <Link className="btn" to={open('song')}>Start creating</Link>
         </nav>
       </header>
 
       <section className="home-hero">
-        <p className="kicker">Film, video, beats, samples</p>
-        <h1>Any sound the picture needs.</h1>
-        <p className="lede">
-          Red Sound is the studio a producer opens for a score, the sound under a video, a beat, or a sample.
-          Record it yourself, drop in your own files, or let the studio write with the audio you already have.
-        </p>
-        <div className="home-meter" aria-hidden="true">
-          {[28, 46, 70, 100, 62, 84, 40, 76, 54, 92, 34, 68, 48, 88, 30].map((height, index) => (
-            <span key={index} style={{ ['--h' as string]: `${height}%`, animationDelay: `${index * 0.08}s` }} />
-          ))}
+        <div className="home-copy">
+          <p className="kicker">Find your sound. Create your sound.</p>
+          <h1>Every sound has a place.</h1>
+          <p className="lede">Songs, beats, samples, and the score under a picture. Open a room. The session is the same studio.</p>
+          <div className="row">
+            <Link className="btn" to={open('song')}>Start creating</Link>
+            <a className="btn secondary" href="#rooms">See the rooms</a>
+          </div>
         </div>
-        <div className="row">
-          <Link className="btn" to={signedIn ? '/studio' : '/login?join=1'}>{signedIn ? 'Open studio' : 'Create account'}</Link>
-          {!signedIn && <Link className="btn secondary" to="/login">Sign in</Link>}
+        <div className="home-session" aria-hidden="true">
+          <div className="home-session-top">
+            <strong>Night drive</strong>
+            <span>128 · C min</span>
+          </div>
+          <div className="home-lanes">
+            {sides.map(([name, width, color]) => (
+              <div className="home-lane" key={name}>
+                <b>{name}</b>
+                <i style={{ width, background: color }} />
+              </div>
+            ))}
+            <div className="home-playhead" />
+          </div>
         </div>
       </section>
 
-      <section id="trades" className="home-wall">
-        {trades.map((trade) => (
-          <article key={trade.name}>
-            <h2>{trade.name}</h2>
-            <p>{trade.copy}</p>
+      <div className="home-ticker" aria-hidden="true">
+        {['Songs', 'Beats', 'Samples', 'Score', 'Vocal', 'Picture', 'Briefs'].map((word) => (
+          <span key={word}>{word}</span>
+        ))}
+      </div>
+
+      <section className="home-frames" aria-label="The studio">
+        <figure>
+          <img src="/brand/studio.jpg" alt="A producer at a desk with headphones, a keyboard, drum pads, and a timeline on the monitor." />
+          <figcaption><span>01</span><strong>The desk</strong></figcaption>
+        </figure>
+        <figure>
+          <img src="/brand/session.jpg" alt="A producer at the keys beside a creator recording on a phone." />
+          <figcaption><span>02</span><strong>The session</strong></figcaption>
+        </figure>
+        <figure>
+          <img src="/brand/picture.jpg" alt="A laptop session beside a creator holding a phone on a gimbal." />
+          <figcaption><span>03</span><strong>The picture</strong></figcaption>
+        </figure>
+      </section>
+
+      <section id="rooms" className="home-block">
+        <div className="home-intro">
+          <p className="kicker">Rooms</p>
+          <h2>Pick the sound. Walk in.</h2>
+        </div>
+        <div className="home-sleeves">
+          {rooms.map((item, index) => (
+            <Link key={item.name} to={open(item.room)} className="home-sleeve">
+              <span className="home-sleeve-face" style={{ background: item.tone, color: item.ink }}>
+                <small>{String(index + 1).padStart(2, '0')}</small>
+                <svg viewBox="0 0 120 36" aria-hidden="true">
+                  {item.wave.map((height, bar) => (
+                    <rect key={bar} x={bar * 10} y={18 - height / 2} width="6" height={height} rx="1" fill="currentColor" />
+                  ))}
+                </svg>
+                <em>{item.bpm === '—' ? 'Free' : `${item.bpm} BPM`}</em>
+              </span>
+              <strong>{item.name}</strong>
+              <p>{item.copy}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section id="floor" className="home-floor">
+        {floor.map(([index, name, copy]) => (
+          <article key={name}>
+            <span>{index}</span>
+            <h2>{name}</h2>
+            <p>{copy}</p>
           </article>
         ))}
       </section>
 
-      <section id="shots" className="home-shots-wrap">
-        <div className="home-shots-head">
-          <div>
-            <p className="kicker">App Store and Play Store</p>
-            <h2>The screens we submit with the app.</h2>
-            <p className="lede">One studio. An iPhone build for the App Store, and an Android build for the Play Store. These are the screenshots of that studio.</p>
-          </div>
-          <div className="home-switch" role="group" aria-label="Store screenshots">
-            <button type="button" className={store === 'apple' ? 'on' : ''} onClick={() => setStore('apple')}>App Store</button>
-            <button type="button" className={store === 'play' ? 'on' : ''} onClick={() => setStore('play')}>Play Store</button>
-          </div>
-        </div>
-        <div className={store === 'play' ? 'home-shots play' : 'home-shots'}>
-          {shots.map((shot) => (
-            <figure key={shot.id}>
-              <img src={`/store/${store}/${shot.id}.png`} alt={`${shot.name} screen of the Red Sound studio`} />
-              <figcaption>{shot.name}</figcaption>
-            </figure>
-          ))}
-        </div>
-        <p className="meta">App Store frames are 1290 × 2796. Play Store frames are 1080 × 1920.</p>
+      <section className="home-close">
+        <p className="kicker">The session</p>
+        <h2>Your next sound starts here.</h2>
+        <Link className="btn" to={open('song')}>Start creating</Link>
       </section>
 
-      <section className="home-plans" id="plans">
-        <p className="kicker">Account</p>
-        <h2>Sign up, then open the studio.</h2>
-        <div className="home-plan-grid">
-          {SOUND_PLANS.map((plan) => (
-            <article key={plan.id}>
-              <p className="kicker">{plan.name}</p>
-              <p className="price">R{plan.amountZar}</p>
-              <p>{plan.summary}</p>
-              <p className="meta">{plan.generations} generations a month</p>
-            </article>
-          ))}
+      <footer className="home-foot">
+        <div>
+          <strong>RED SOUND</strong>
+          <p>Find your sound. Create your sound.</p>
         </div>
-        <Link className="btn" to={signedIn ? '/plans' : '/login?join=1'}>{signedIn ? 'See plans' : 'Create account'}</Link>
-      </section>
+        <nav>
+          <Link to="/about">About</Link>
+          <Link to="/contact">Contact</Link>
+          <Link to="/terms">Terms</Link>
+          <Link to="/privacy">Privacy</Link>
+          <Link to="/copyright">Copyright</Link>
+          <Link to={signedIn ? '/studio' : '/login'}>{signedIn ? 'Open studio' : 'Sign in'}</Link>
+          <Link to={signedIn ? '/studio' : '/login?join=1'}>Create account</Link>
+        </nav>
+      </footer>
     </main>
   );
 }
