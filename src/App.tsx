@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { Shell } from './components/Shell';
 import { AssetPage } from './pages/AssetPage';
+import { ConvertPage } from './pages/ConvertPage';
 import { CreatePage } from './pages/CreatePage';
 import { EarningsPage } from './pages/EarningsPage';
 import { LandingPage } from './pages/LandingPage';
@@ -25,6 +26,7 @@ export function App() {
         <Route path="/terms" element={<NoticePage />} />
         <Route path="/privacy" element={<NoticePage />} />
         <Route path="/copyright" element={<NoticePage />} />
+        <Route path="/convert" element={<ConvertPage />} />
         <Route path="/shots/:frame" element={<ShotPage />} />
         <Route element={<RequireAuth />}>
           <Route element={<Shell />}>

@@ -10,6 +10,9 @@
     "test": "tsx --test server/domain/rights.test.ts server/domain/arrange.test.ts server/suno/generate.test.ts"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
     "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

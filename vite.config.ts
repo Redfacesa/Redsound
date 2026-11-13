@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: {
     alias: { '@shared': path.resolve(__dirname, 'shared') },
   },
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core'],
+  },
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:8787',

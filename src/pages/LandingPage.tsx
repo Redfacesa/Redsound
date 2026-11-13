@@ -47,6 +47,7 @@ export function LandingPage() {
         <nav className="home-nav">
           <a href="#floor">The floor</a>
           <a href="#rooms">Rooms</a>
+          <Link to="/convert">Convert</Link>
           <Link to={signedIn ? '/studio' : '/login'}>{signedIn ? 'Open studio' : 'Sign in'}</Link>
           <Link className="btn" to={open('song')}>Start creating</Link>
         </nav>
@@ -168,6 +169,7 @@ export function LandingPage() {
           <Link to="/terms">Terms</Link>
           <Link to="/privacy">Privacy</Link>
           <Link to="/copyright">Copyright</Link>
+          <Link to="/convert">Convert</Link>
           <Link to={signedIn ? '/studio' : '/login'}>{signedIn ? 'Open studio' : 'Sign in'}</Link>
           <Link to={signedIn ? '/studio' : '/login?join=1'}>Create account</Link>
         </nav>

@@ -30,6 +30,7 @@ export function Shell() {
           <div className="nav-label">STUDIO</div>
           <button className="nav-new" type="button" onClick={() => navigate('/create')}>+ New</button>
           <NavLink to="/studio">Sessions</NavLink>
+          <NavLink to="/convert">Convert</NavLink>
         </div>
         <div className="nav-group">
           <div className="nav-label">LIBRARY</div>
